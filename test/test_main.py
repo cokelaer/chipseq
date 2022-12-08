@@ -3,10 +3,9 @@ import os
 import tempfile
 import subprocess
 import sys
-from sequana.pipelines_common import get_pipeline_location as getpath
 
-sharedir = getpath('chipseq')
-
+from . import test_dir
+sharedir = test_dir
 
 def test_standalone_subprocess():
     directory = tempfile.TemporaryDirectory()

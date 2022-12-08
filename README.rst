@@ -45,7 +45,8 @@ Requirements
 
 This pipelines requires the following executable(s):
 
-- TODO
+- idr This python package is not on pypi. Manual installation is required. Instructions are here:
+https://github.com/nboley/idr but we also provide a singularity in https://damona.readthedocs.io
 
 .. image:: https://raw.githubusercontent.com/sequana/sequana_chipseq/master/sequana_pipelines/chipseq/dag.png
 

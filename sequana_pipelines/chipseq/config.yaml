@@ -1,29 +1,234 @@
 # ============================================================================
-# Config file for Quality Control
-# ==========================================[ Sections for the users ]========
+# Config file for RNA-seq
+#
+# ==================[ Sections for the users ]================================
 #
 # One of input_directory, input_pattern and input_samples must be provided
 # If input_directory provided, use it otherwise if input_pattern provided,
 # use it, otherwise use input_samples.
 # ============================================================================
-
-
-input_directory: '{}'
+input_directory: "../data/data_idr" 
 input_readtag: _R[12]_
-input_pattern: '{}'
+input_pattern: '*fastq.gz'
+# =========================================== Sections for the users
+
+apptainers:
+  sequana_tools: "https://zenodo.org/record/7102074/files/sequana_tools_0.14.3.img"
+  fastqc: "https://zenodo.org/record/7015004/files/fastqc_0.11.9-py3.img"
+  fastp: "https://zenodo.org/record/7319782/files/fastp_0.23.2.img"
+  phantompeak: "https://zenodo.org/record/7301453/files/phantompeakqualtools_1.2.2.img"
+  homer: "https://zenodo.org/record/7305501/files/homer_4.11.0.img"
+  idr: ""
 
 
-##############################################################################
-# Your section
+#############################################################################
+# Genome section:
+#
+# :Parameters:
+#
+# - aligner: either star, bowtie or bowtie2
+# - genome_directory: directory where all indexes are written.
+#
+# - fragment_size
+# - fingerprint_bins: the number of bins that are sampled from the genome,
+#     for which the overlapping number of reads is computed. (typically  500000
+#     for human). Default to 5000 for bacteria
+
+general:
+    aligner: bowtie2
+    genome_directory: ../data/ecoli_MG1655/
+    fragment_size: 200    # Estimated fragment size used to extend single-end reads in bedtobigwig and Fingerprint
+    fingerprint_bins: 5000  
+
+    design_file: design.csv
+
+
+
+##################################################################
+# sequencing information. These informations will be inserted as
+# read group in BAM files
+#
+# :Parameters:
+#
+# - platform: Name of the sequencing platform
+# - instrument: name ot the instrument type
+# - flowcell: flowcell ID
+sequencing:
+    platform: Illumina
+    instrument: Hiseq2500
+    flowcell: H35CTBCXY
+
+
+#################################################################
+# FastQC section
 #
 # :Parameters:
 #
 # - options: string with any valid FastQC options
-todo:
-    example1: true
-
-
-##############################################################################
 #
-onsuccess:
-    toclean: " slurm*out chipseq.rules config.yaml stats.txt "
+fastqc:
+    skip_fastqc_raw: True
+    options: --nogroup
+    threads: 4
+    resources:
+        mem: 4G
+
+
+
+
+#############################################################################
+# -Q should disable the quality filter
+#
+# Quality filtering only limits the N base number (-n, --n_base_limit) 
+# meaning if 5 Ns are found, the read is discarded, 
+# -q is the quality value se to Q15 to be qualified; If more than 40% of bases
+# are unqualified, the read is discarded.
+# You can also filter reads by average quality score using -e QUAL_score
+#
+# minimum length is set to 15 by default
+#
+# Adapter trimming is set by default. Can be disable with -A
+# For adapters, this is automatic but you can be specific using 
+# --adapter_sequence for read1, and --adapter_sequence_r2 for read2.
+# The --cut_tail moves a sliding window from tail (3') to front, drop the bases 
+# in the window if its mean quality is below cut_mean_quality, stop otherwise. 
+# Use cut_tail_window_size to set the widnow size (default 4)), and 
+# cut_tail_mean_quality to set the mean quality threshold (default 20)
+# Other useful options: --disable_adapter_trimming and --disable_quality_filtering.
+# or -n 5 (minimum number of Ns required to discard a read)
+fastp:
+    options: --cut_tail 
+    #--reads_to_process 100000
+    minimum_length: 20
+    adapters: ''
+    quality: 15
+    threads: 4
+    disable_adapter_trimming: false
+    disable_quality_filtering: false
+
+#######################################################
+# Quality trimming software choice
+#
+# software_choice__ = ["fastp"]
+#
+trimming:
+    software_choice: fastp
+    do: true
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+remove_blacklist:
+    do: true
+    blacklist_file: blacklist.bed
+    threads: 1
+
+
+#############################################################################
+# genomesize could be hs for human, mm for mouse, otherwise provide your own.
+#
+# options is set to --keep-dup auto
+# This option  controls the maximum same tags allowed in macs3. By default
+# all are kept using 'auto'. If set to an integer, limit number of maximum
+# identical tags to that integer. By default uses a pvalue of 1e-5 as pvalue
+# cutoff assuming binomial distribution.
+#
+#
+#############################################################################
+peak_calling:
+    #model_choice: 'broad'    # we do both all the time.
+    #no_model: no             ## may be yes
+    bandwidth: 300   # default bandwidth option --bw from macs3
+    broad_cutoff: 0.05
+    genome_size: 5000000  # this may be important and need to be changed --g
+    options: " --keep-dup all --nomodel "  ## we keep all duplicates and let macs3 do the job
+    qvalue: 0.05
+    read_length: 75   # not currently used
+
+
+#############################################################################
+# bowtie2_mapping used to align reads against genome file
+#
+# :Parameters:
+#
+# - do: if unchecked, this rule is ignored
+# - options: any options recognised by bowtie2 tool
+# - threads: number of threads to be used
+#
+bowtie2_mapping:
+    #options: "--dovetail --no-mixed --no-discordant " for paired-end data
+    options: ''
+    threads: 4
+    genome_size_larger_than_4gb: false
+    resources:
+        mem: 20G
+
+bowtie2_index:
+    options: ''
+    threads: 4
+    resources:
+      mem: 20G
+
+
+#############################################################################
+# mark_duplicates (picard-tools) allows to mark PCR duplicate in BAM files
+#
+# :Parameters:
+#
+# - do: if unchecked, this rule is ignored. Mandatory for RNA-SeQC tool.
+# - remove: If true do not write duplicates to the output file instead of writing them with
+#            appropriate flags set.  Default value: false. This option can be set to 'null' to clear
+#            the default value. Possible values: {true, false}
+# - tmpdir: write tempory file on this directory (default TMP_DIR=/tmp/, but could be "TMP_DIR=/local/scratch/")
+#
+mark_duplicates:
+    do: false
+    remove: false ## may be True
+    tmpdir: ./tmp/
+    threads: 4
+
+#############################################################################
+# IDR computation
+#
+# IDR computation can be switch off completely by setting 'do' to false.
+# When computing the IDR on the replicates, you may also perform extra validation
+# with the pseudo_replicates and self_pseudo_replicates IDR computation. You may 
+# switch off these optional computation by setting the pseudo_replicates and/or 
+# self_pseudo_replicates to 0.
+idr:
+  do: true
+  pseudo_replicates: 2
+  self_pseudo_replicates: 2
+
+#############################################################################
+#   MultiQC aggregates results from bioinformatics analyses across many
+#   samples into a single report.
+#
+# :Parameters:
+#
+# - options: any options recognised by multiqc
+# - output-directory: Create report in the specified output directory
+# - config_file: by default, we use sequana RNA-seq multiqc_config file. 
+#       If you want your own multiqc, fill this entry
+multiqc:
+    options: -f -x *_init_* -x *left_kept_reads* -x *fastqc_samples* -e htseq -e slamdunk
+    output_directory: multiqc
+    config_file: multiqc_config.yaml
+
+
+
+
