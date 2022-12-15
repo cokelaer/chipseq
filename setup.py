@@ -20,16 +20,16 @@ metainfo = {
     'platforms' : ['Linux', 'Unix', 'MacOsX', 'Windows'],
     'keywords' : ['NGS, snakemake, sequana, ChIP-seq, immunoprecipitation'],
     'classifiers' : [
-          'Development Status :: 4 - Beta',
-          #'Development Status :: 5 - Production/Stable',
+          'Development Status :: 5 - Production/Stable',
           'Intended Audience :: Education',
           'Intended Audience :: End Users/Desktop',
           'Intended Audience :: Developers',
           'Intended Audience :: Science/Research',
           'License :: OSI Approved :: BSD License',
           'Operating System :: OS Independent',
-          'Programming Language :: Python :: 3.5',
-          'Programming Language :: Python :: 3.6',
+          'Programming Language :: Python :: 3.7',
+          'Programming Language :: Python :: 3.8',
+          'Programming Language :: Python :: 3.9',
           'Topic :: Software Development :: Libraries :: Python Modules',
           'Topic :: Scientific/Engineering :: Bio-Informatics',
           'Topic :: Scientific/Engineering :: Information Analysis',
@@ -69,22 +69,18 @@ setup(
     classifiers      = metainfo['classifiers'],
 
     # package installation
-    packages = ["sequana_pipelines.chipseq",
-        'sequana_pipelines.chipseq.data' ],
-
-    install_requires = open("requirements.txt").read(),
+    packages=["sequana_pipelines.chipseq" ],
+    install_requires=open("requirements.txt").read(),
 
     # This is recursive include of data files
     exclude_package_data = {"": ["__pycache__"]},
     package_data = {
         '': ['*.yaml', "*.rules", "*.json", "requirements.txt", "*png"],
-        'sequana_pipelines.chipseq.data' : ['*.*'], 
         },
 
     zip_safe=False,
 
     entry_points = {'console_scripts':[
-        'sequana_pipelines_chipseq=sequana_pipelines.chipseq.main:main',
         'sequana_chipseq=sequana_pipelines.chipseq.main:main']
     }
 

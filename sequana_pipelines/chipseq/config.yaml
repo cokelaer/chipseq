@@ -7,18 +7,20 @@
 # If input_directory provided, use it otherwise if input_pattern provided,
 # use it, otherwise use input_samples.
 # ============================================================================
-input_directory: "../data/data_idr" 
+input_directory: "" 
 input_readtag: _R[12]_
 input_pattern: '*fastq.gz'
 # =========================================== Sections for the users
 
 apptainers:
-  sequana_tools: "https://zenodo.org/record/7102074/files/sequana_tools_0.14.3.img"
-  fastqc: "https://zenodo.org/record/7015004/files/fastqc_0.11.9-py3.img"
-  fastp: "https://zenodo.org/record/7319782/files/fastp_0.23.2.img"
-  phantompeak: "https://zenodo.org/record/7301453/files/phantompeakqualtools_1.2.2.img"
-  homer: "https://zenodo.org/record/7305501/files/homer_4.11.0.img"
-  idr: ""
+    sequana_tools: https://zenodo.org/record/7341710/files/sequana_tools_0.14.5.img
+    fastqc: https://zenodo.org/record/7015004/files/fastqc_0.11.9-py3.img
+    fastp: https://zenodo.org/record/7319782/files/fastp_0.23.2.img
+    phantompeak: https://zenodo.org/record/7301453/files/phantompeakqualtools_1.2.2.img
+    homer: https://zenodo.org/record/7305501/files/homer_4.11.0.img
+    ucsc: https://sandbox.zenodo.org/record/1135854/files/ucsc_3.7.7.img
+    samtools: https://zenodo.org/record/7437898/files/samtools_1.16.1.img
+    idr: ''
 
 
 #############################################################################
@@ -28,35 +30,16 @@ apptainers:
 #
 # - aligner: either star, bowtie or bowtie2
 # - genome_directory: directory where all indexes are written.
+# - design.csv is the experimental design file
 #
-# - fragment_size
-# - fingerprint_bins: the number of bins that are sampled from the genome,
-#     for which the overlapping number of reads is computed. (typically  500000
-#     for human). Default to 5000 for bacteria
-
+#   type,condition,replicat,sample_name
+#   IP,    WT,   1, IP_WT_rep1
+#   IP,    WT,   2, IP_WT_rep2
+#   Input, WT, 1, Input_WT
 general:
     aligner: bowtie2
-    genome_directory: ../data/ecoli_MG1655/
-    fragment_size: 200    # Estimated fragment size used to extend single-end reads in bedtobigwig and Fingerprint
-    fingerprint_bins: 5000  
-
+    genome_directory:
     design_file: design.csv
-
-
-
-##################################################################
-# sequencing information. These informations will be inserted as
-# read group in BAM files
-#
-# :Parameters:
-#
-# - platform: Name of the sequencing platform
-# - instrument: name ot the instrument type
-# - flowcell: flowcell ID
-sequencing:
-    platform: Illumina
-    instrument: Hiseq2500
-    flowcell: H35CTBCXY
 
 
 #################################################################
@@ -73,7 +56,15 @@ fastqc:
     resources:
         mem: 4G
 
-
+##########################################################################
+# Fingerprints
+#
+# - fingerprint_bins: the number of bins that are sampled from the genome,
+#     for which the overlapping number of reads is computed. (typically  500000
+#     for human). Default to 5000 for bacteria
+fingerprints:
+    do: false
+    bins: 5000
 
 
 #############################################################################
@@ -97,7 +88,7 @@ fastqc:
 # Other useful options: --disable_adapter_trimming and --disable_quality_filtering.
 # or -n 5 (minimum number of Ns required to discard a read)
 fastp:
-    options: --cut_tail 
+    options: --cut_tail
     #--reads_to_process 100000
     minimum_length: 20
     adapters: ''
@@ -117,24 +108,9 @@ trimming:
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 remove_blacklist:
-    do: true
-    blacklist_file: blacklist.bed
+    do: false
+    blacklist_file: 
     threads: 1
 
 
@@ -149,12 +125,12 @@ remove_blacklist:
 #
 #
 #############################################################################
-peak_calling:
+macs3:
     #model_choice: 'broad'    # we do both all the time.
     #no_model: no             ## may be yes
     bandwidth: 300   # default bandwidth option --bw from macs3
     broad_cutoff: 0.05
-    genome_size: 5000000  # this may be important and need to be changed --g
+    genome_size:       # filled automatically this may be important and need to be changed 
     options: " --keep-dup all --nomodel "  ## we keep all duplicates and let macs3 do the job
     qvalue: 0.05
     read_length: 75   # not currently used
@@ -183,6 +159,11 @@ bowtie2_index:
     resources:
       mem: 20G
 
+# sequana implements its ow phantom peak detection but you can also
+# use spp for sanity check. Results are slightly different but should convey
+# the same information
+phantom:
+  use_spp: false
 
 #############################################################################
 # mark_duplicates (picard-tools) allows to mark PCR duplicate in BAM files
@@ -211,22 +192,27 @@ mark_duplicates:
 # self_pseudo_replicates to 0.
 idr:
   do: true
-  pseudo_replicates: 2
-  self_pseudo_replicates: 2
+  pseudo_replicates: 1
+  self_pseudo_replicates: 1
+  rank: 'signal.value'  # could be p.value or q.value
+  soft_idr_threshold: 0.05
+
 
 #############################################################################
-#   MultiQC aggregates results from bioinformatics analyses across many
-#   samples into a single report.
+#  MultiQC aggregates results from bioinformatics analyses across several
+#  samples into a single report.
 #
 # :Parameters:
 #
 # - options: any options recognised by multiqc
-# - output-directory: Create report in the specified output directory
-# - config_file: by default, we use sequana RNA-seq multiqc_config file. 
-#       If you want your own multiqc, fill this entry
+# - modules: list of modules to use. Let this empty to scan all modules
+# - intput_directory: directory to scan 
+# - config_file: by default, we use the multiqc_config file of the pipeline 
+#     if found, otherwise fill this entry with your own.
 multiqc:
-    options: -f -x *_init_* -x *left_kept_reads* -x *fastqc_samples* -e htseq -e slamdunk
-    output_directory: multiqc
+    options: -p -f 
+    modules: '' 
+    input_directory: .
     config_file: multiqc_config.yaml
 
 

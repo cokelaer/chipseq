@@ -12,14 +12,14 @@
 #TODO:  multiBigwigSummary bins -b list bam file separated by spaces  -o test.npz -bs 10000 
 #Number of bins found: 1437
 #plotCorrelation --corData test.npz  --corMethod pearson -p heatmap --plotFile test.png  --zMin 0.8
-
-
-import glob
+import shutil
 import os
-import sequana
 from os.path import join
 from sequana_pipetools import snaketools as sm
+
+import sequana
 import sequana.featurecounts as fc
+from sequana import sequana_data
 
 sequana_wrapper_branch="main"
 
@@ -39,16 +39,32 @@ __data__input = manager.getrawdata()
 
 
 rule chipseq:
-    input: "multiqc/multiqc_report.html", ".sequana/rulegraph.svg", ".sequana/qc.done"
+    input: "multiqc/multiqc_report.html", ".sequana/rulegraph.svg"
 
 
-# Make sure it is absolute
+# Let us copy the ref/annotation files locally (redundant but so useful 
+# for distributing, reproducing).
 genome_directory = os.path.abspath(config["general"]["genome_directory"])
 genome_name = genome_directory.rsplit("/", 1)[1]
 
-__prefix_name__ = genome_directory + "/" + genome_name
-__fasta_file__ = __prefix_name__ + ".fa"
-__gff_file__   = __prefix_name__ + ".gff"
+
+
+#
+prefix_name = genome_directory + "/" + genome_name
+fasta_file = prefix_name + ".fa"
+gff_file   = prefix_name + ".gff"
+
+
+from sequana_pipelines.chipseq.tools import ChIPExpDesign
+cc = ChIPExpDesign(config["general"]["design_file"])
+design = cc.get_IP_versus_control()
+
+
+
+
+def copy_no_data_image(output):
+    no_data = sequana_data("no_data.png")
+    shutil.copy(no_data, output)
 
 
 # ============================================================================ bowtie2 index
@@ -68,6 +84,7 @@ if manager.config.general.aligner == "bowtie2":
 
     # tested on version 2.4.2
     try:
+        import subprocess
         p = subprocess.Popen(['bowtie2'], stderr=subprocess.PIPE)
         p.wait()
         stderr = p.stderr.read().decode().split("\n")
@@ -84,7 +101,7 @@ if manager.config.general.aligner == "bowtie2":
     else:
         rule bowtie2_index:
             input:
-                reference=__fasta_file__
+                reference=fasta_file
             output:
                 multiext(
                     bowtie2_index,
@@ -147,7 +164,7 @@ else:
              html="{sample}/fastp/fastp.html",
              json="{sample}/fastp/fastp.json", # must be named fastp
          log:
-             "logs/fastp/{sample}.log"
+             "{sample}/fastp/{sample}.log"
          params:
              options=config['fastp']["options"],
              adapters=config["fastp"]["adapters"]
@@ -218,6 +235,7 @@ if manager.config.general.aligner == "bowtie2":
     DATA = __mapping_output
 
 
+# ===================================================== mark duplicates
 # duplicates can be from PCR or if SR, by pure chance; if Paired, most likely a PCR origin.
 # Mark duplicates
 if config["mark_duplicates"]["do"]:
@@ -243,6 +261,7 @@ if config["mark_duplicates"]["do"]:
     __final_bam__ = "{sample}/mark_duplicates/{sample}.sorted.markdup.bam"
     DATA = __final_bam__
 
+# ===================================================== blaclist
 if manager.config.remove_blacklist.do:
     if os.path.exists(manager.config.remove_blacklist.blacklist_file):
 
@@ -271,16 +290,17 @@ else:
     DATA_LOCATION = "bowtie2"
 
 
-rule phantom:
+# ===================================================== phantom detection using spp
+rule phantom_spp:
     input: DATA
     output:
-        pdf= "{sample}/phantom/spp.pdf",
-        rdata= "{sample}/phantom/spp.Rdata",
-        out= "{sample}/phantom/spp.out",
+        pdf= "{sample}/phantom_spp/spp.pdf",
+        rdata= "{sample}/phantom_spp/spp.Rdata",
+        out= "{sample}/phantom_spp/spp.out",
     threads: 1
     log:
-        out="{sample}/phantom/{sample}.out",
-        err="{sample}/phantom/{sample}.err"
+        out="{sample}/phantom_spp/{sample}.out",
+        err="{sample}/phantom_spp/{sample}.err"
     container:
         config["apptainers"]["phantompeak"]
     shell:
@@ -288,64 +308,70 @@ rule phantom:
         run_spp.R -c={input} -savp={output.pdf} -savd={output.rdata}  -out={output.out} -p={threads} -rf 1>{log.out} 2>{log.err}
         """
 
+# ===================================================== phantom detection using sequana
 
-
-rule phantom2:
-    input: DATA
+rule phamtom_align:
+    input:
+        DATA
     output:
-        png= "{sample}/phantom2/phantom.png",
-        json= "{sample}/phantom2/phantom.json",
-        align=DATA + ".align"
-    log: "{sample}/phantom2/phantom.log"
+        align= DATA + ".align"
+    container:
+        config["apptainers"]["samtools"]
+    shell:
+        """
+        # Converting the SAM to alignment
+        # note that for awk, we escape the braces by doubling them
+        samtools view -F 0x0204  {input} | awk 'BEGIN {{FS="\\t";OFS="\\t"}} {{if (and($2,16) > 0) {{print $3,($4-1),($4-1+length($10)),"N","1000","-"}} else {{print $3,($4-1),($4-1+length($10)),"N","1000","+"}}}}' - > {output.align}
+        """
+
+
+rule phantom:
+    input:
+        align= DATA + ".align"
+    output:
+        png= "{sample}/phantom/phantom.png",
+        json= "{sample}/phantom/phantom.json",
+    log:
+        "{sample}/phantom/phantom.log"
     threads: 1
     run:
+        import json
+        from pylab import savefig
+        from sequana.phantom import Phantom
 
-        print("Converting the SAM to alignment")
-        # note that for awk, we escape the braces by doubling them
-        cmd = "samtools view -F 0x0204 " + input[0]
-        cmd += """  |awk  'BEGIN {{FS="\\t";OFS="\\t"}} {{if (and($2,16) > 0) {{print $3,($4-1),($4-1+length($10)),"N","1000","-"}} else {{print $3,($4-1),($4-1+length($10)),"N","1000","+"}}}}'  >"""
-        cmd +=   output.align
-
-        print(cmd)
-        shell(cmd)
-
-        print("Reading alignments and computing cross correlation")
-        from sequana import chipseq
-        c = chipseq.Phantom(binning=5)
-        c.read_align(output.align)
+        # Reading alignments and computing cross correlation
+        c = Phantom(binning=5)
+        c.read_align(input.align)
         results, df = c.run()
         stats = c.stats(results, df)
-        print(stats)
-        import json
+
         with open(output.json, "w") as fout:
             json.dump(stats, fout)
 
-        from pylab import savefig
-        print(output.png)
         savefig(output.png)
 
+expected_output += expand("{sample}/phantom/phantom.png", sample=manager.samples)
+expected_output += expand("{sample}/phantom_spp/spp.pdf", sample=manager.samples)
 
 
 
-rule QCs:
+
+# ===================================================== get chrom size file
+rule chrom_sizes:
     input:
-        phantom2=expand("{sample}/phantom2/phantom.png", sample=manager.samples),
-        phantom=expand("{sample}/phantom/spp.pdf", sample=manager.samples)
-    output:
-        ".sequana/qc.done"
+        fasta_file
+    output: 
+        "chrom.sizes"
+    container:
+        config["apptainers"]["sequana_tools"]
     shell:
         """
-        touch {output}
+        samtools faidx {input}
+        cut -f 1,2 {input[0]}.fai > {output[0]}
         """
 
 
-rule chrom_sizes:
-    input: __fasta_file__
-    output: "chrom.sizes"
-    run:
-        shell(f"cut -f 1,2 {input[0]}.fai > {output[0]}")
-
-
+# ===================================================== fingerprints
 # Did my ChIP work i.e. did the antibody-treatment enrich sufficiently so that the ChIP signal 
 # can be separated from the background signal? around 90% of all DNA fragments in a 
 # ChIP experiment will represent the genomic background.
@@ -361,56 +387,76 @@ rule fingerprints:
         pdf="fingerprints/plotFingerprint.pdf"
     params:
         labels=" ".join(sorted(manager.samples)),
-        fingerprint_bins=config['general']['fingerprint_bins']
+        bins=config['fingerprints']['bins']
     threads: 4
     container:
         config['apptainers']['sequana_tools']
     shell:
         """
-        plotFingerprint --bamfiles {input} --plotFile {output.pdf} --labels {params.labels} --outRawCounts {output.raw} --outQualityMetrics {output.metrics} --skipZeros --numberOfProcessors {threads} --numberOfSamples {params.fingerprint_bins}
+        plotFingerprint --bamfiles {input} --plotFile {output.pdf} --labels {params.labels} --outRawCounts {output.raw} --outQualityMetrics {output.metrics} --skipZeros --numberOfProcessors {threads} --numberOfSamples {params.bins}
 
         """
 
-expected_output += ["fingerprints/plotFingerprint.raw.txt", "fingerprints/plotFingerprint.qcmetrics.txt", "fingerprints/plotFingerprint.pdf"]
+if config['fingerprints']['do']:
+    expected_output += [
+            "fingerprints/plotFingerprint.raw.txt",
+            "fingerprints/plotFingerprint.qcmetrics.txt",
+            "fingerprints/plotFingerprint.pdf"]
 
 
-rule bam_to_bigwig:
+# ===================================================== bam to bed
+# TODO: scale is hard-coded to 1 but should be derived from the data itself
+#shell("samtools flagstat {input[0]} > {input[0]}.flagstats")
+#SCALE=`grep 'mapped (' {input[0].flagstats} | awk '{print 1000000/$1}'`
+#
+rule bam_to_bed:
     input:
-        DATA,
-        chrom_sizes="chrom.sizes"
+        DATA
     output:
         bedgraph=temp("{sample}/bigwig/{sample}.bedGraph"),
-        bigwig="{sample}/bigwig/{sample}.bigwig"
-    #container:
-    #    config['apptainers']['bam_to_bigwig']
-    run:
-
+    params:
         paired = " -pc " if manager.paired else " "
-        fragment_size = " -fs " if config['general']['fragment_size'] and manager.paired is False else " "
+    container:
+        config['apptainers']['sequana_tools']
+    shell:
+        """
+        genomeCoverageBed -ibam {input[0]} -bg -scale 1  {params.paired} | sort -T '.' -k1,1 -k2,2n >  {output.bedgraph}
+        """
 
-        # TODO: scale is hard-coded to 1 but should be derived from the data
-        # itself
-        #shell("samtools flagstat {input[0]} > {input[0]}.flagstats")
-        #SCALE=`grep 'mapped (' {input[0].flagstats | awk '{print 1000000/$1}'`
 
-        shell("genomeCoverageBed -ibam {input[0]} -bg -scale 1  {paired} | sort -T '.' -k1,1 -k2,2n >  {output.bedgraph}")
-        shell("bedGraphToBigWig {output.bedgraph} {input.chrom_sizes} {output.bigwig}")
+# ===================================================== bed to bigwig
+rule bed_to_bigwig:
+    input:
+        bedgraph="{sample}/bigwig/{sample}.bedGraph",
+        chrom_sizes="chrom.sizes"
+    output:
+        bigwig="{sample}/bigwig/{sample}.bigwig"
+    container:
+        config['apptainers']['ucsc']
+    shell:
+        """
+        bedGraphToBigWig {input.bedgraph} {input.chrom_sizes} {output.bigwig}
+        """
+
 expected_output.extend(expand("{sample}/bigwig/{sample}.bigwig", sample=manager.samples))
-
-
-from sequana.chipseq import ChIPExpDesign
-cc = ChIPExpDesign(config["general"]["design_file"])
-design = cc.get_IP_versus_control()
 
 
 def get_IP_macs3(wildcards):
     IP = design[wildcards.comp]['IP']
     return f"{IP}/bowtie2/{IP}.sorted.bam"
 
+
 def get_control_macs3(wildcards):
     ctrl = design[wildcards.comp]['control']
     return f"{ctrl}/bowtie2/{ctrl}.sorted.bam"
 
+
+def get_idr_NT_input(wildcards):
+    NT_inputs = cc.get_idr_NT_inputs()[wildcards.condition]
+    return (f"macs3/{wildcards.broad_narrow}/{x}_peaks.{wildcards.broad_narrow}Peak" for x in NT_inputs)
+
+
+# ===================================================== macs3
 rule macs3:
     input:
         inputs = get_IP_macs3,
@@ -418,13 +464,13 @@ rule macs3:
     output:
         "macs3/{broad_narrow}/{comp}_peaks.{broad_narrow}Peak"
     params:
-        bandwidth       = config['peak_calling']['bandwidth'],
-        genome_size     = config['peak_calling']['genome_size'],
-        options         = " --keep-dup all ",
-        broad_cutoff    = config['peak_calling']['broad_cutoff'],
+        bandwidth       = config['macs3']['bandwidth'],
+        genome_size     = config['macs3']['genome_size'],
+        options         = config['macs3']['options'],
+        broad_cutoff    = config['macs3']['broad_cutoff'],
         paired          = manager.paired,
         prefix          = "{comp}",
-        qvalue          = config['peak_calling']['qvalue'],
+        qvalue          = config['macs3']['qvalue'],
         mode            = "{broad_narrow}"
     log:
         "macs3/{broad_narrow}/{comp}_out.log"
@@ -432,27 +478,30 @@ rule macs3:
         f"{sequana_wrapper_branch}/wrappers/macs3"
 
 
-def get_idr_NT_input(wildcards):
-    NT_inputs = cc.get_idr_NT_inputs()[wildcards.condition]
-    return (f"macs3/{wildcards.broad_narrow}/{x}_peaks.{wildcards.broad_narrow}Peak" for x in NT_inputs)
-
+# ===================================================== naive consensus summary
 rule naive_consensus:
     input:
         get_idr_NT_input
     output:
-        "macs3/{broad_narrow}/{condition}_venn.png"
+        "macs3/{broad_narrow}/{condition}_venn.png",
     run:
-        from sequana import chipseq
-        pc = chipseq.PeakConsensus(input[0], input[1])
-        pc.plot_venn()
+        from sequana.macs3 import PeakConsensus
         from pylab import savefig, title
-        title(f"{wildcards.broad_narrow}/{wildcards.condition}")
-        savefig(output[0], dpi=200)
+
+        pc = PeakConsensus(input[0], input[1])
+        if len(pc.df1) and len(pc.df2):
+            pc.plot_venn()
+            title(f"{wildcards.broad_narrow}/{wildcards.condition}")
+            savefig(output[0], dpi=200)
+
+            df_merged = pc.merge()
+        else:
+            copy_no_data_image(output[0])
 
 expected_output += expand("macs3/{mode}/{comp}_venn.png", mode=['broad','narrow'], comp=cc.get_idr_NT_inputs().keys())
 
 
-
+# ===================================================== FRiP
 rule FRiP:
     input:
         bamfiles=expand("{sample}/{DATA_LOCATION}/{sample}.sorted.bam", sample=manager.samples, DATA_LOCATION=DATA_LOCATION),
@@ -481,41 +530,58 @@ rule FRiP:
                 in_peaks = v['in_peaks']
                 comparison = wildcards.comparison
                 fout.write(f"{k},{count},{in_peaks},{frip}, {comparison}\n")
-#expected_output += expand("macs3/narrow/{comparison}_FRiP.txt", comparison=design.keys())
-#expected_output += expand("macs3/broad/{comparison}_FRiP.txt", comparison=design.keys())
 
 
+# ===================================================== plot FRiP
 rule plot_FRiP:
     input: "macs3/{broad_narrow}/{comparison}_FRiP.txt"
     output: "FRiP/{broad_narrow}/{comparison}_FRiP.png"
     run:
-        from sequana import chipseq
+        from sequana.frip import FRiP
         for k in design.keys():
-            c = chipseq.FRiP(f"macs3/{wildcards.broad_narrow}/{k}_FRiP.txt") #, config["general"]["design_file"])
+            c = FRiP(f"macs3/{wildcards.broad_narrow}/{k}_FRiP.txt") #, config["general"]["design_file"])
             c.plot()
             from pylab import savefig
             savefig(f"FRiP/{wildcards.broad_narrow}/{k}_FRiP.png")
 expected_output += expand("FRiP/narrow/{comparison}_FRiP.png", comparison=design.keys())
 expected_output += expand("FRiP/broad/{comparison}_FRiP.png", comparison=design.keys())
 
-# homer tool
+
+# ============================================================== annotation
 rule annotate_peaks:
     input:
         macs3="macs3/{broad_narrow}/{comp}_peaks.{broad_narrow}Peak",
-        fasta = __fasta_file__,
-        gff   = __gff_file__
+        fasta = fasta_file,
+        gff   = gff_file
     output:
         annotations = "annotate_peaks/{broad_narrow}/{comp}.txt"
     threads: 1
+    log:
+        "annotate_peaks/{broad_narrow}/{comp}.log"
     container:
         config['apptainers']['homer']
     shell:
         """
-        annotatePeaks.pl {input.macs3} {input.fasta} -gid -gff {input.gff} -cpu {threads} 1>{output.annotations}
+        annotatePeaks.pl {input.macs3} {input.fasta} -gid -gff {input.gff} -cpu {threads} 1>{output.annotations} 2>{log}
         """
 
-expected_output += [f"annotate_peaks/narrow/{k}.txt" for k in design.keys()]
-expected_output += [f"annotate_peaks/broad/{k}.txt" for k in design.keys()]
+
+# ============================================================== annotation plots
+rule plot_annotated_peaks:
+    input:
+        annotations = "annotate_peaks/{broad_narrow}/{comp}.txt"
+    output:
+        png = "annotate_peaks/{broad_narrow}/{comp}.png"
+    run:
+        from sequana.homer import Homer
+        from pylab import savefig
+
+        h = Homer(input[0])
+        h.pie_annotation()
+        savefig(output[0], dpi=200)
+
+expected_output += [f"annotate_peaks/narrow/{k}.png" for k in design.keys()]
+expected_output += [f"annotate_peaks/broad/{k}.png" for k in design.keys()]
 
 
 ########################### IDR ###############################################
@@ -525,97 +591,45 @@ if config['idr']['do']:
     # Peak consistency between true replicates
     # Nt for Number of True replicates
 
-    def get_idr_NT_input(wildcards):
-        NT_inputs = cc.get_idr_NT_inputs()[wildcards.condition]
-        return (f"macs3/{wildcards.broad_narrow}/{x}_peaks.{wildcards.broad_narrow}Peak" for x in NT_inputs)
-
-
+    # =========================================================================
+    # ============================================ true replicates         ====
+    # =========================================================================
     rule idr_NT:
         input: get_idr_NT_input
-        output: "idr_NT/{broad_narrow}/{condition}.csv"
+        output: "IDR/{broad_narrow}/{condition}.csv"
         params:
-            rank='signal.value',  # could be p.value or q.value
-            soft_idr_threshold=0.05
+            rank=config['idr']['rank'],
+            soft_idr_threshold=config['idr']['soft_idr_threshold']
         container:
             config['apptainers']['idr']
         shell:
             """
-            idr --samples {input} --input-file-type {wildcards.broad_narrow}Peak --rank {params.rank} --output-file idr_NT/{wildcards.broad_narrow}/{wildcards.condition}  --plot --soft-idr-threshold {params.soft_idr_threshold}
-            mv idr_NT/{wildcards.broad_narrow}/{wildcards.condition} idr_NT/{wildcards.broad_narrow}/{wildcards.condition}.csv
+            idr --samples {input} --input-file-type {wildcards.broad_narrow}Peak --rank {params.rank} --output-file IDR/{wildcards.broad_narrow}/{wildcards.condition}  --plot --soft-idr-threshold {params.soft_idr_threshold}
+            mv IDR/{wildcards.broad_narrow}/{wildcards.condition} IDR/{wildcards.broad_narrow}/{wildcards.condition}.csv
            """
 
     rule plot_idr:
-        input: "idr_NT/{broad_narrow}/{condition}.csv"
+        input: "IDR/{broad_narrow}/{condition}.csv"
         output:
-            image_ranks="idr_NT/{broad_narrow}/{condition}_ranks.png",
-            image_scores="idr_NT/{broad_narrow}/{condition}_scores.png",
-            image_rank_idr="idr_NT/{broad_narrow}/{condition}_rank_idr.png"
+            image_ranks="IDR/{broad_narrow}/{condition}_ranks.png",
+            image_scores="IDR/{broad_narrow}/{condition}_scores.png",
+            image_rank_idr="IDR/{broad_narrow}/{condition}_rank_idr.png"
 
         run:
-            import pandas as pd
-            import pylab
-            narrow_columns = ['chrom', 'start', 'end', 'region_name', 'score', 'strand',
-                       'signalValue', 'pvalue', 'qvalue', 'summit', 'local_idr',
-                        'global_idr' , 'rep1_chrom_start', 'rep1_chrom_end', 'rep1_signal',
-                        'rep1_summit', 'rep2_chrom_start', 'rep2_chrom_end', 'rep2_signal',
-                        'rep2_summit']
-            broad_columns = ['chrom', 'start', 'end', 'region_name', 'score', 'strand',
-                       'signalValue', 'pvalue', 'qvalue', 'local_idr',
-                        'global_idr' , 'rep1_chrom_start', 'rep1_chrom_end', 'rep1_signal',
-                        'rep2_chrom_start', 'rep2_chrom_end', 'rep2_signal']
+            from sequana.idr import IDR
+            idr = IDR(input[0])
+            if len(idr.df):
+                idr.plot_ranks(output.image_ranks, savefig=True)
+                idr.plot_scores(output.image_scores, savefig=True)
+                idr.plot_rank_vs_idr_score(output.image_rank_idr, savefig=True)
+            else:
+                for filename in output:
+                    copy_no_data_image(str(filename))
 
 
-            for this in input:
-                df = pd.read_csv(this, sep='\t', header=None)
-                if "narrow" in this:
-                    df.columns = narrow_columns
-                else:
-                    df.columns = broad_columns
-
-                df['rep2_rank'] = df['rep2_signal'].rank() / len(df)
-                df['rep1_rank'] = df['rep1_signal'].rank() / len(df)
-
-
-                # ranks
-                # the *score* columns contains the scaled IDR value, min(int(log2(-125IDR), 1000). 
-                # e.g. peaks with an IDR of 0 have a score of 1000, idr 0.05 have a score of 
-                # int(-125log2(0.05)) = 540, and idr 1.0 has a score of 0.
-                df1 = df.query('score>540')
-                df2 = df.query('score<=540')
-                pylab.clf()
-                pylab.plot(df1.rep1_rank, df1.rep2_rank, 'ko',
-                            alpha=0.5,label='<0.05 IDR')
-                pylab.plot(df2.rep1_rank, df2.rep2_rank, 'ro',
-                            alpha=0.5,label='>=0.05 IDR')
-                pylab.xlim([0,1.05])
-                pylab.ylim([0,1.05])
-                pylab.legend(loc='lower right')
-                pylab.savefig(this.replace(".csv","") + "_ranks.png")
-
-                # scores
-                from pylab import log10
-                pylab.clf()
-                pylab.plot(log10(df.query('score>540')['rep1_signal']),
-                           log10(df.query('score>540')['rep2_signal']), 'ko', 
-                            alpha=0.5,label='<0.05 IDR')
-                pylab.plot(log10(df.query('score<540')['rep1_signal']),
-                           log10(df.query('score<540')['rep2_signal']), 'ro', 
-                            alpha=0.5,label='>=0.05 IDR')
-                pylab.xlabel("Rep1 log10 score")
-                pylab.ylabel("Rep2 log10 score")
-                pylab.legend(loc='lower right')
-                pylab.savefig(this.replace(".csv","") + "_scores.png")
-
-                # rank versus IDR scores
-                f, axes = pylab.subplots(2, 1)
-
-                axes[0].plot(range(len(df)), df.sort_values(by='rep1_rank', ascending=True)['local_idr'], 'o')
-                axes[1].plot(range(len(df)), df.sort_values(by='rep2_rank', ascending=True)['local_idr'], 'ro')
-                pylab.savefig(this.replace(".csv","") + "_rank_idr.png")
-
-    expected_output += expand("idr_NT/{broad_narrow}/{condition}_ranks.png", broad_narrow=['broad','narrow'], condition=cc.get_idr_NT_inputs().keys())
-    expected_output += expand("idr_NT/{broad_narrow}/{condition}_rank_idr.png", broad_narrow=['broad','narrow'], condition=cc.get_idr_NT_inputs().keys())
-    expected_output += expand("idr_NT/{broad_narrow}/{condition}_scores.png", broad_narrow=['broad','narrow'], condition=cc.get_idr_NT_inputs().keys())
+    expected_output += expand("IDR/{broad_narrow}/{condition}_ranks.png", broad_narrow=['broad','narrow'], condition=cc.get_idr_NT_inputs().keys())
+    expected_output += expand("IDR/{broad_narrow}/{condition}_rank_idr.png", broad_narrow=['broad','narrow'], condition=cc.get_idr_NT_inputs().keys())
+    expected_output += expand("IDR/{broad_narrow}/{condition}_scores.png", broad_narrow=['broad','narrow'], condition=cc.get_idr_NT_inputs().keys())
 
 
     # =========================================================================
@@ -641,13 +655,13 @@ if config['idr']['do']:
             nlines=$(( (nlines + 1) / 2 ))
 
             # keep header for later
-            samtools view -H {input} > {output.tmp_header} > {log}
+            samtools view -H {input} 1> {output.tmp_header} 2>> {log}
 
             # shuffle data and split in 2 files
-            samtools view {input} | shuf - | split -d -l ${{nlines}} - SPR_IDR/{wildcards.condition}_rep{wildcards.rep}_SPR{wildcards.N} > {log}
+            samtools view {input} | shuf - | split -d -l ${{nlines}} - SPR_IDR/{wildcards.condition}_rep{wildcards.rep}_SPR{wildcards.N} >> {log}
 
-            cat header.txt {output.tmp_split0} | samtools view -bS -> {output.rep1}
-            cat header.txt {output.tmp_split1} | samtools view -bS -> {output.rep2}
+            cat {output.tmp_header} {output.tmp_split0} | samtools view -bS -> {output.rep1}
+            cat {output.tmp_header} {output.tmp_split1} | samtools view -bS -> {output.rep2}
             """
 
     rule self_pseudo_replicate_peaks:
@@ -657,13 +671,13 @@ if config['idr']['do']:
         output:
             "SPR_IDR/macs3/{broad_narrow}/{condition}_rep{rep}_rep{rep2}_SPR{N}_peaks.{broad_narrow}Peak"
         params:
-            bandwidth       = config['peak_calling']['bandwidth'],
-            genome_size     = config['peak_calling']['genome_size'],
-            options         = " --keep-dup all ",
-            broad_cutoff    = config['peak_calling']['broad_cutoff'],
+            bandwidth       = config['macs3']['bandwidth'],
+            genome_size     = config['macs3']['genome_size'],
+            options         = config['macs3']['options'],
+            broad_cutoff    = config['macs3']['broad_cutoff'],
             paired          = manager.paired,
             prefix          = "{condition}_rep{rep}_rep{rep2}_SPR{N}",
-            qvalue          = config['peak_calling']['qvalue'],
+            qvalue          = config['macs3']['qvalue'],
             mode            = "{broad_narrow}"
         log:
             "SPR_IDR/macs3/{broad_narrow}/{condition}_rep{rep}_rep{rep2}_SPR{N}.log"
@@ -673,13 +687,13 @@ if config['idr']['do']:
 
     rule self_pseudo_replicate_idr:
         input:
-            ["SPR_IDR/macs3/{broad_narrow}/{condition}_rep{rep}_rep1_SPR{N}_peaks.{broad_narrow}Peak",
-            "SPR_IDR/macs3/{broad_narrow}/{condition}_rep{rep}_rep2_SPR{N}_peaks.{broad_narrow}Peak"]
+            "SPR_IDR/macs3/{broad_narrow}/{condition}_rep{rep}_rep1_SPR{N}_peaks.{broad_narrow}Peak",
+            "SPR_IDR/macs3/{broad_narrow}/{condition}_rep{rep}_rep2_SPR{N}_peaks.{broad_narrow}Peak"
         output:
             "SPR_IDR/idr/{broad_narrow}/{condition}_rep{rep}_SPR{N}.csv"
         params:
-            rank='signal.value',  # could be p.value or q.value
-            soft_idr_threshold=0.05
+            rank=config['idr']['rank'],
+            soft_idr_threshold=config['idr']['soft_idr_threshold'] 
         container:
             config['apptainers']['idr']
         shell:
@@ -715,20 +729,20 @@ if config['idr']['do']:
             samtools merge -u {output.tmp_merged_bam} {input.bamfiles} > {log}
 
             # keep header for later
-            samtools view -H {output.tmp_merged_bam} > {output.tmp_header} > {log}
+            samtools view -H {output.tmp_merged_bam} 1> {output.tmp_header} 2>> {log}
 
             # how many lines do we have ?
             nlines=$(samtools view {output.tmp_merged_bam} | wc -l)
             nlines=$(( (nlines + 1) / 2 ))
 
             # shuffle data and split in 2 files
-            samtools view {output.tmp_merged_bam} | shuf - | split -d -l ${{nlines}} - PR_IDR/{wildcards.condition}_PR{wildcards.N} > {log}
+            samtools view {output.tmp_merged_bam} | shuf - | split -d -l ${{nlines}} - PR_IDR/{wildcards.condition}_PR{wildcards.N} >> {log}
 
-            cat header.txt {output.tmp_split0} | samtools view -bS -> {output.rep1}
-            cat header.txt {output.tmp_split1} | samtools view -bS -> {output.rep2}
+            cat {output.tmp_header} {output.tmp_split0} | samtools view -bS -> {output.rep1}
+            cat {output.tmp_header} {output.tmp_split1} | samtools view -bS -> {output.rep2}
 
             # cleanup
-            # input file is kept unchanged but in case there are several, we could do the same 
+            # input file is kept unchanged but in case there are several, we could do the same
             # operations as above.
             """
 
@@ -737,15 +751,15 @@ if config['idr']['do']:
             inputs="PR_IDR/{condition}_{rep}_PR{N}.bam",
             controls = "Input_{condition}/bowtie2/Input_{condition}.sorted.bam"
         output:
-            "PR_IDR/macs3/{broad_narrow}/{condition}_{rep}_PR{N}_peaks.{broad_narrow}Peak"         
+            "PR_IDR/macs3/{broad_narrow}/{condition}_{rep}_PR{N}_peaks.{broad_narrow}Peak"
         params:
-            bandwidth       = config['peak_calling']['bandwidth'],
-            genome_size     = config['peak_calling']['genome_size'],
-            options         = " --keep-dup all ",
-            broad_cutoff    = config['peak_calling']['broad_cutoff'],
+            bandwidth       = config['macs3']['bandwidth'],
+            genome_size     = config['macs3']['genome_size'],
+            options         = config['macs3']['options'],
+            broad_cutoff    = config['macs3']['broad_cutoff'],
             paired          = manager.paired,
             prefix          = "{condition}_{rep}_PR{N}",
-            qvalue          = config['peak_calling']['qvalue'],
+            qvalue          = config['macs3']['qvalue'],
             mode            = "{broad_narrow}"
         log:
             "PR_IDR/macs3/{broad_narrow}/{condition}_{rep}_PR{N}.log"
@@ -760,8 +774,8 @@ if config['idr']['do']:
         output:
             "PR_IDR/idr/{broad_narrow}/{condition}_PR{N}.csv"
         params:
-            rank='signal.value',  # could be p.value or q.value
-            soft_idr_threshold=0.05
+            rank=config['idr']['rank'],
+            soft_idr_threshold=config['idr']['soft_idr_threshold']
         container:
             config['apptainers']['idr']
         shell:
@@ -772,8 +786,8 @@ if config['idr']['do']:
 
     expected_output += expand("PR_IDR/idr/{broad_narrow}/{condition}_PR{N}.csv", broad_narrow=['broad','narrow'], condition=cc.conditions, N=range(1, config['idr'].get('pseudo_replicates',1)+1))
 
-        # No further analysis (plotting, annotation, etc) since we only want to use the pseudo_replicate_idr
-        # to check the robustess of the number of peaks identified in common in the 2 replicates.
+    # No further analysis (plotting, annotation, etc) since we only want to use the pseudo_replicate_idr
+    # to check the robustess of the number of peaks identified in common in the 2 replicates.
 
     NPR = config['idr'].get('pseudo_replicates',1) + 1
     rule pseudo_replicate_plotting:
@@ -781,7 +795,11 @@ if config['idr']['do']:
             expand("PR_IDR/idr/{mode}/{condition}_PR{i}.csv",
                         mode=['broad','narrow'],
                         condition=cc.conditions,
-                        i=range(1, NPR))
+                        i=range(1, NPR)),
+            expand("IDR/{mode}/{condition}.csv",
+                        mode=['broad','narrow'],
+                        condition=cc.conditions
+                        )
         output:
             images=expand("outputs/IDR_NT_vs_PR_{mode}.png", mode=['narrow','broad']),
             csv=expand("outputs/IDR_NT_vs_PR_{mode}.csv", mode=['narrow','broad'])
@@ -789,18 +807,22 @@ if config['idr']['do']:
             idr=0.05
         run:
             import pylab
-            from sequana import chipseq
+            from sequana.idr import IDR
             import pandas as pd
+            from collections import defaultdict
+            from pandas.core.computation.ops import UndefinedVariableError
 
             for mode in ['broad','narrow']:
                 pylab.clf()
                 df = []
-                from collections import defaultdict
                 NPRs = defaultdict(list)
                 for condition in cc.conditions:
                     for i in range(1, NPR):
-                        idr = chipseq.IDR(f"PR_IDR/idr/{mode}/{condition}_PR{i}.csv")
-                        NPRs[condition].append(len(idr.df.query('idr<@params.idr')))
+                        idr = IDR(f"PR_IDR/idr/{mode}/{condition}_PR{i}.csv")
+                        try:
+                            NPRs[condition].append(len(idr.df.query('idr<@params.idr')))
+                        except UndefinedVariableError: # df may be empty
+                            NPRs[condition].append(0)
                 df = pd.DataFrame(NPRs)
                 # sort columns
                 df = df[sorted(df.columns)]
@@ -808,8 +830,11 @@ if config['idr']['do']:
                 df.boxplot()
                 # plot boxplot and real IDR values
                 for i,condition in enumerate(df.columns):
-                    idr = chipseq.IDR(f"idr_NT/{mode}/{condition}.csv")
-                    pylab.plot([i+1], [len(idr.df.query("idr<@params.idr"))], 'ok')
+                    idr = IDR(f"IDR/{mode}/{condition}.csv")
+                    try:
+                        pylab.plot([i+1], [len(idr.df.query("idr<@params.idr"))], 'ok')
+                    except UndefinedVariableError: # df may be empty
+                        NPRs[condition].append(0)
                 pylab.title(f"{mode} case")
                 pylab.ylabel('Number of IDR peaks')
                 pylab.savefig(f"outputs/IDR_NT_vs_PR_{mode}.png", dpi=200)
@@ -827,7 +852,7 @@ rule plot_peak_count:
     run:
         import pandas as pd
         import pylab
-        from sequana.chipseq import MACS3Reader
+        from sequana.macs3 import MACS3Reader
 
         for mode in ('narrow', 'broad'):
             npeaks = []
@@ -857,16 +882,20 @@ if config['idr']['do']:
     ######################## ANNOTATE IDR PEAKS  ##################################################
     rule annotate_peaks_idr:
         input:
-            macs3="idr_NT/{broad_narrow}/{comp}.csv",
-            fasta = __fasta_file__,
-            gff   = __gff_file__
+            macs3="IDR/{broad_narrow}/{comp}.csv",
+            fasta = fasta_file,
+            gff   = gff_file
         output:
             annotations = "annotate_peaks_idr/{broad_narrow}/{comp}.txt"
         threads: 1
+        log:
+            "annotate_peaks_idr/{broad_narrow}/{comp}.log"
         container:
             config['apptainers']['homer']
         shell:
-            "annotatePeaks.pl {input.macs3} {input.fasta} -gid -gff {input.gff} -cpu {threads} 1>{output.annotations}"
+            """
+            annotatePeaks.pl {input.macs3} {input.fasta} -gid -gff {input.gff} -cpu {threads} 1>{output.annotations} 2>{log}
+            """
 
     expected_output += expand( "annotate_peaks_idr/{broad_narrow}/{comp}.txt", broad_narrow=['broad', 'narrow'],
         comp=cc.get_idr_NT_inputs().keys())
@@ -875,33 +904,42 @@ if config['idr']['do']:
     #################### FEATURE COUNTS ON IDR PEAKS ###############################################
     rule idr_2_saf:
         input:
-            "idr_NT/{broad_narrow}/{comp}.csv"
+            "IDR/{broad_narrow}/{comp}.csv"
         output:
-            "idr_NT/{broad_narrow}/{comp}.saf"
+            "IDR/{broad_narrow}/{comp}.saf"
         run:
-            from sequana.chipseq import IDR
+            from sequana.idr import IDR
+            import pandas as pd
             df = IDR(input[0]).df
-            df['Strand'] = "+"
-            df['GeneID'] = df.index
-            df = df[["GeneID", "chrom", "start", "end", "Strand"]]
-            df.columns = ['GeneID', 'Chr', 'Start', 'End', 'Strand']
-            df.to_csv(output[0], sep="\t", index=None)
-
+            if len(df):
+                df['Strand'] = "+"
+                df['GeneID'] = df.index
+                df = df[["GeneID", "chrom", "start", "end", "Strand"]]
+                df.columns = ['GeneID', 'Chr', 'Start', 'End', 'Strand']
+                df.to_csv(output[0], sep="\t", index=None)
+            else:
+                df = pd.DataFrame(columns=['GeneID', 'Chr', 'Start', 'End', 'Strand'])
+                df.loc[0] = ["A", 1,1,1,"+"]
+                df.to_csv(output[0], sep="\t", index=None)
 
     rule feature_counts:
         input:
-            saf="idr_NT/{broad_narrow}/{comp}.saf",
-            bamfiles=expand("{sample}/{DATA_LOCATION}/{sample}.sorted.bam", 
-                              sample=cc.df.query("condition=='WT'").sample_name.values, 
-                              DATA_LOCATION=DATA_LOCATION),
-        output: 
+            saf="IDR/{broad_narrow}/{comp}.saf",
+            bamfiles=expand("{sample}/{DATA_LOCATION}/{sample}.sorted.bam",
+                              sample=cc.df.query("type=='IP'").sample_name.values,
+                              DATA_LOCATION=DATA_LOCATION)
+        output:
             "featureCounts/{broad_narrow}/{comp}.feature_counts.out"
         threads: 4
-        params: 
+        log:
+            "feature_counts/{broad_narrow}/{comp}.log"
+        params:
             paired = " -p --donotsort " if manager.paired else " "
+        container:
+            config['apptainers']['sequana_tools']
         shell:
             """
-                featureCounts -FSAF -O --fracOverlap 0.2 -T {threads} {params.paired} -a {input.saf} -o {output} {input.bamfiles}
+                featureCounts -FSAF -O --fracOverlap 0.2 -T {threads} {params.paired} -a {input.saf} -o {output} {input.bamfiles} 1>{log} 2>{log}
             """
     expected_output += expand("featureCounts/{broad_narrow}/{comp}.feature_counts.out", broad_narrow=['broad', 'narrow'], comp=cc.get_idr_NT_inputs().keys())
 
@@ -910,54 +948,66 @@ if config['idr']['do']:
 
     static_idr = cc.get_idr_NT_inputs().keys()
     rule plot_idr_peak_counts:
-        input: [f"idr_NT/narrow/{comp}.csv" for comp in static_idr] + [f"idr_NT/broad/{comp}.csv" for comp in static_idr]
-        output: "outputs/idr_peak_counts.png"
+        input:
+            [f"IDR/narrow/{comp}.csv" for comp in static_idr] + [f"IDR/broad/{comp}.csv" for comp in static_idr]
+        output:
+            "outputs/idr_peak_counts.png"
         run:
+            from sequana.idr import IDR
+            import pylab
+
             N = len(input) / 2
             X = range(int(N))
             labels = static_idr
-            from sequana import chipseq
             narrow = {'N':[], 'Ns':[]}
             broad = {'N':[], 'Ns':[]}
             for filename in input:
-                c = chipseq.IDR(filename)
+                c = IDR(filename)
                 if "/narrow/" in filename:
                     narrow['N'].append(len(c.df))
                     narrow['Ns'].append(c.N_significant_peaks)
                 elif "/broad/" in filename:
                     broad['N'].append(len(c.df))
                     broad['Ns'].append(c.N_significant_peaks)
-            import pylab
+
             f, axes = pylab.subplots(1,2, figsize=(10,6))
+
             axes[0].bar(X, narrow['N'], label='Peaks found in common')
             axes[0].bar(X, narrow['Ns'], label='Significative peaks found in common')
             pylab.sca(axes[0])
             pylab.xticks(X, labels)
+
             axes[1].bar(X, broad['N'], label='Peaks found in common')
             axes[1].bar(X, broad['Ns'], label='Significative peaks found in common')
             axes[1].legend(loc='upper right')
             pylab.sca(axes[1])
             pylab.xticks(X, labels)
+
             pylab.savefig(output[0])
+
     expected_output += ["outputs/idr_peak_counts.png"]
 
 
 rule igv_list:
     input:
         design="design.csv",
-        gff=__gff_file__,
+        gff=gff_file,
         samples=expand("{sample}/bigwig/{sample}.bigwig", sample=manager.samples)
     output:
         "igv_list.txt"
     run:
-        from sequana import chipseq
-        c = chipseq.ChIPExpDesign(input.design)
+        from sequana_pipelines.chipseq.tools import ChIPExpDesign
+        c = ChIPExpDesign(input.design)
         conditions = c.conditions
         colors = ["blue", "red", "yellow", "green"]
         with open(output[0], "w") as fout:
             for i, condition in enumerate(c.conditions):
                 for sample in c.df.query("condition==@condition").sample_name:
                     fout.write(f"{sample}/bigwig/{sample}.bigwig\t{colors[i]}\n")
+                    if not sample.startswith('Input_'):
+                        sample_no_IP = sample.replace("IP_", "").replace("_rep", "_")
+                        fout.write(f"macs3/narrow/{sample_no_IP}_peaks.narrowPeak\t{colors[i]}\n")
+                        fout.write(f"macs3/broad/{sample_no_IP}_peaks.broadPeak\t{colors[i]}\n")
             fout.write(f"{input.gff}\tblack\n")
 
 
@@ -979,8 +1029,8 @@ rule igv:
                     filelist.append(f)
                     colors.append(c)
 
-        xml = """<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<Session genome="custom" hasGeneTrack="true" hasSequenceTrack="true" locus="All" version="8">
+        xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<Session genome="{fasta_file}" hasGeneTrack="true" hasSequenceTrack="true" locus="All" version="8">
 <Resources>"""
         for ifile,color in zip(filelist, colors):
             xml += '\t\t<Resource path="%s"/>\n' % (ifile)
@@ -1018,25 +1068,40 @@ rule igv:
 expected_output+= ["igv.xml"]
 
 
-# Multiqc rule
-__multiqc__input = expected_output
-__multiqc__input_dir = "."
-__multiqc__logs = "multiqc/multiqc.log"
-__multiqc__output = "multiqc/multiqc_report.html"
-if os.path.exists(config['multiqc']['config_file']):
-    __multiqc__options = " -c " + config['multiqc']['config_file'] + " "+config['multiqc']['options']
-else :
-    __multiqc__options = config['multiqc']['options']
-__multiqc__output_dir = config['multiqc']['output_directory']
 
-include: sm.modules["multiqc"]
+# ========================================================== multiqc
+multiqc_params_options = config['multiqc']['options']
+if manager.config.multiqc.config_file:
+    multiqc_params_options += f" -c {manager.config.multiqc.config_file}"
+ 
+rule multiqc:
+    input:
+        expected_output
+    output:
+       "multiqc/multiqc_report.html"
+    params:
+        options=multiqc_params_options,
+        input_directory=config['multiqc']['input_directory'],
+        config_file=config['multiqc']['config_file'],
+        modules=config['multiqc']['modules']
+    log:
+        "multiqc/multiqc.log"
+    wrapper:
+        f"{sequana_wrapper_branch}/wrappers/multiqc"
 
 
-# Include rule graph for each sample
-__rulegraph__input = manager.snakefile
-__rulegraph__output = ".sequana/rulegraph.svg"
-__rulegraph__mapper = {"multiqc": "../multiqc/multiqc_report.html"}
-include: sm.modules['rulegraph']
+os.makedirs("rulegraph", exist_ok=True)
+shutil.copy("design.csv", "rulegraph/")
+rule rulegraph:
+    input:
+        manager.snakefile
+    output:
+        svg=".sequana/rulegraph.svg"
+    params:
+        mapper = {"multiqc": "../multiqc/multiqc_report.html"},
+        configname = "config.yaml"
+    wrapper:
+        f"{sequana_wrapper_branch}/wrappers/rulegraph"
 
 
 
@@ -1045,34 +1110,52 @@ localrules: rulegraph
 
 
 onsuccess:
-    # Create plots about stats
+
+    import glob
     from sequana import logger
     from sequana.modules_report.summary import SummaryModule2
+    from sequana.utils.datatables_js import DataTable
+    from sequana.utils.df2html import df2html
+    from sequana.idr import IDR
+    from sequana.macs3 import MACS3Reader
+    from sequana_pipelines.chipseq import version
 
-    logger.setLevel("INFO")
+    import colorlog
+    import pandas as pd
+    from plotly import offline
+
+    # cleanup
+    log = colorlog.getLogger("sequana.chipseq")
+    log.setLevel("INFO")
+
     manager.teardown(
         extra_files_to_remove=[ "requirements.txt"],
-        extra_dirs_to_remove=[".genomes", "tmp", "logs"])
-    manager.clean_multiqc(__multiqc__output)
+        extra_dirs_to_remove=[])
+    manager.clean_multiqc("multiqc/multiqc_report.html")
 
 
     # THE HTML REPORT is defined hereafter
     #
-    from sequana_pipelines import chipseq
     data = {"name": "chipseq",
-            "rulegraph": __rulegraph__output,
+            "rulegraph":".sequana/rulegraph.svg",
             "stats": "stats.txt",
-            "pipeline_version": chipseq.version}
+            "pipeline_version": version}
 
-    intro =f"""
+    intro = f"""
     <h2>Overview</h2>
     <p>
-    The chipseq pipeline maps the reads on the provided reference using {__fasta_file__}.
-    Peaks were extracted with macs3.
+    The ChIP-seq pipeline from Sequana maps the IP and Input reads on the provided reference ({fasta_file}).
+    Peaks are then extracted with macs3 tool and IDR statistics are provided with replicates.
     </p>
 
-    <p>A <a href="multiqc/multiqc_report.html">multiqc report</a> is available, where various QC and mapping quality plots can be visualised.
+    <p>A <a href="multiqc/multiqc_report.html">multiqc report</a> is available, where various QCs and mapping quality plots are also complementary to the following plots.
     </p>
+
+    <h2>Data structure</h2>
+    <p>Each sample has its own directory with sub-directories for each processing step including cleanup (fastp), fastqc (fastqc and fastqc_clean), mapping (e.g. bowtie2/), creation of bigwig file (bigwig/) and phantom peak detection. Single Peak analysis is available in a global diretory called macs3/ and annotations of the single peaks are in annotate_peaks/. IDR peak analysis is also available and stored in IDR/ ; annotations of IDR peaks are in annotate_peaks_idr. Additional directoy calld PR_IDR and SPR_IDR are summarised in this report and may not be distributed.
+    </p>
+
+
     """
 
     intro += """
@@ -1090,11 +1173,17 @@ onsuccess:
 </p>
     """
 
-    from sequana.summary import MultiSummary
-    ms = MultiSummary()
-    for sample in cc.df['sample_name']:
-        ms.read_summary(f"{sample}/phantom2/phantom.json", label=sample)
-    intro += ms.get_html_table(['NSC', 'RSC', 'Qtag'])
+    df = pd.DataFrame([
+        pd.read_json(f"{sample}/phantom/phantom.json", typ="series") for sample in cc.df['sample_name']
+    ])
+    df.corr_max = df.corr_max.round(3)
+    df.phantom_corr = df.phantom_corr.round(3)
+    df.NSC = df.NSC.round(2)
+    df.RSC = df.RSC.round(2)
+    df['sample_name'] = cc.df['sample_name']
+    df = df[['sample_name', 'read_fragments', 'corr_max', 'NSC', 'RSC', 'Qtag']]
+    intro +=  df2html(df, show_index='sample_name')
+ 
 
     intro += """
          <!--<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>-->
@@ -1107,8 +1196,8 @@ onsuccess:
     intro +=' data-loop="true"'
     intro += ' data-width="{}"  data-height="{}"'.format(500,500)
     intro += ">"
-    import glob
-    files = glob.glob("*/phantom2/phantom.png")
+
+    files = glob.glob("*/phantom/phantom.png")
     captions = [filename.split("/")[0] for filename in files]
     for filename, caption in zip(files, captions):
         intro += '<img src="{}" data-caption="{}">'.format(filename, caption)
@@ -1116,14 +1205,9 @@ onsuccess:
 
     intro += """
     <h3>FRiP</h3>
-    <p>FRiP is the fraction of reads found in the detected peaks. When we detect peaks, we have two options: narrow or broad. Besides, 
+    <p>FRiP is the fraction of reads found in the detected peaks. When we detect peaks, we have two options: narrow or broad. Besides,
     one need to decide upon the sample(s) where peaks have to be detected as compare to sample(s) considered as noise. Consequently, the combination can be quite large depending on your experimental design. However, in a given ChiP-seq experiment, we expect the FRiP to be larger in IP samples, and lower in Input/Control samples. Replicates should also have similar behaviours. In the following figures, we show the number of reads in peaks versus the FRiP. This two values should be correlated. Moreover, the IP samples should cluster togther and control should cluster together (though this may depend on the conditions). Note that in the following plots, we show all samples but for peaks detected in specific conditions (e.g. we show the FRiP calculated on 10 samples but from peaks computed using 1 IP and 1 control).</p>"""
-    intro +='<div class="fotorama" fzyz-keyboard="true" '
-    intro +=' data-nav="thumbs"'
-    intro +=' data-loop="true"'
-    intro += ' data-width="{}"  data-height="{}"'.format(500,500)
-    intro += ">"
-    import glob
+    intro +='<div class="fotorama" fzyz-keyboard="true" data-nav="thumbs" data-loop="true" data-width="500" data-height="500" >'
     files = glob.glob("FRiP/*/*.png")
     captions = ["/".join(filename.split("/")[1:]) for filename in files]
     for filename, caption in zip(files, captions):
@@ -1137,7 +1221,6 @@ onsuccess:
     <div><p>Here below are the samples names with their type (IP for immuno-precipitated), condition and replicate. The sample name is derived from the filename.</p></div>
 
     """
-    from sequana.utils.df2html import df2html
     intro += df2html(cc.df)
     intro += """
     <h3>Single peak detection</h3>
@@ -1145,7 +1228,6 @@ onsuccess:
 </p>
     """
 
-    import pandas as pd
     keys = sorted(cc.get_IP_versus_control().keys())
     narrow = [f"{key}_peaks.narrowPeak" for key in keys]
     narrow_links = [f"macs3/narrow/{key}_peaks.narrowPeak" for key in keys]
@@ -1156,17 +1238,37 @@ onsuccess:
     intro += df2html(df, dom='rt', show_index=True) + "<br>"
     intro += "<p>Here below, we summarize the number of peaks per type (narrow and broad) across all combinaisons of valid IPs versus controls.</p>"
 
-    intro += SummaryModule2.png_to_embedded_png("peak_narrow_counts", "outputs/peak_narrow_counts.png",
-      style="width:45%; height:40%")
-    intro += SummaryModule2.png_to_embedded_png("peak_broad_counts", "outputs/peak_broad_counts.png",
-      style="width:45%; height:40%")
+    intro += SummaryModule2.png_to_embedded_png("peak_narrow_counts", "outputs/peak_narrow_counts.png", style="width:45%; height:40%")
+    intro += SummaryModule2.png_to_embedded_png("peak_broad_counts", "outputs/peak_broad_counts.png", style="width:45%; height:40%")
 
+
+    for key in keys:
+        ph = MACS3Reader(f"macs3/narrow/{key}_peaks.narrowPeak")
+        fig = ph.plot_volcano(plotly=True,  title=f"narrow {key}")
+        intro += offline.plot(fig, output_type='div', include_plotlyjs=True)
+    for key in keys:
+        ph = MACS3Reader(f"macs3/broad/{key}_peaks.broadPeak")
+        fig = ph.plot_volcano(plotly=True,  title=f"broad {key}")
+        intro += offline.plot(fig, output_type='div', include_plotlyjs=True)
+     
+    # ===================================================== single peak annotation plots 
+    intro += """<h3>Single peak annotation</h3>
+    <div class="fotorama" fzyz-keyboard="true" data-nav="thumbs" data-loop="true" data-width="500" data-height="500">"""
+
+    files = glob.glob("annotate_peaks/narrow/*png") + glob.glob("annotate_peaks/broad/*png")
+    captions = files
+    for filename, caption in zip(files, captions):
+        intro += '<img src="{}" data-caption="{}">'.format(filename, caption)
+    intro +="</div>"
+
+    # ===================================================== naive peak consensus venn diagram plots
+    intro += "<h3>Naive peak consensus (overlap replicates)</h3>"
     for cond in cc.get_idr_NT_inputs().keys():
         for mode in ['narrow', 'broad']:
-            intro += SummaryModule2.png_to_embedded_png(f"peak_{mode}_{cond}_venn", f"macs3/{mode}/{cond}_venn.png",
-              style="width:30%; height:40%")
+            intro += SummaryModule2.png_to_embedded_png(f"peak_{mode}_{cond}_venn", f"macs3/{mode}/{cond}_venn.png", style="width:30%; height:40%")
 
 
+    # ===================================================== IDR
     intro += """<h3>IDR peak detection</h3><h4>Overview</h4>The figure below shows the number of significant peaks found in common and with significant IDR (orange) as compared to the common ones. IDRs are computed only when 2 replicates are available. """
 
 
@@ -1176,8 +1278,7 @@ onsuccess:
         for peak_type in ['narrow', 'broad']:
             for key in cc.get_idr_NT_inputs().keys():
                 intro += f"<h4><u>Case replicate {key} ({peak_type})</u></h4>"
-                from sequana.chipseq import IDR
-                idr = IDR(f"idr_NT/narrow/{key}.csv")
+                idr = IDR(f"IDR/narrow/{key}.csv")
                 df = idr.df
                 intro += f"<p>A total of {len(df)} peaks were found after IDR analysis and {idr.N_significant_peaks} are found with an IDR<0.05</p>"
                 intro += df2html(df, dom='Bfrtip')
@@ -1187,12 +1288,12 @@ onsuccess:
                 intro +=' data-loop="true"'
                 intro += ' data-width="{}"  data-height="{}"'.format(500,500)
                 intro += ">"
-            
-                files = [f"idr_NT/{peak_type}/{key}_idr_vs_peaks.png",
-                         f"idr_NT/{peak_type}/{key}_ranks.png",
-                         f"idr_NT/{peak_type}/{key}_scores.png",
+
+                files = [f"IDR/{peak_type}/{key}_idr_vs_peaks.png",
+                         f"IDR/{peak_type}/{key}_ranks.png",
+                         f"IDR/{peak_type}/{key}_scores.png",
                          #f"macs3/{peak_type}/{key}_peak_consensus_venn.png",
-                         f"idr_NT/{peak_type}/{key}_rank_idr.png"]
+                         f"IDR/{peak_type}/{key}_rank_idr.png"]
 
                 captions = ["idr_vs_peaks. peaks below 0.05 are kept (red)", 
                             "ranks between peaks should agree (black are kept)", 
@@ -1229,16 +1330,18 @@ onsuccess:
         intro+='<th colspan="3" style="border:1px solid black">narrow</th>'
     intro+="</tr>"
 
-    from sequana import chipseq
     NSPR = config["idr"].get("self_pseudo_replicates", 1) +1
 
     for item in range(1, NSPR):
         intro+= "<tr>"
         for condition in cc.conditions:
             for mode in ['broad', 'narrow']:
-                _data = [len(chipseq.IDR(f"SPR_IDR/idr/{mode}/{condition}_rep{rep}_SPR{item}.csv")) for rep in [1,2]]
-                try:ratio = int(max(_data)/min(_data)*100)/100.
-                except ZeroDivisionError: pass
+                _data = [len(IDR(f"SPR_IDR/idr/{mode}/{condition}_rep{rep}_SPR{item}.csv")) for rep in [1,2]]
+                try:
+                    ratio = int(max(_data)/min(_data)*100)/100.
+                except ZeroDivisionError:
+                    ratio = 4
+                    pass
                 intro += f'<td style="border: 1px solid black">{_data[0]}</td>'
                 intro += f'<td style="border: 1px solid black">{_data[1]}</td>'
                 if ratio > 2:
@@ -1255,16 +1358,21 @@ onsuccess:
 
 
     intro += """<h2>Final information</h2>"""
-    intro += """<p>All alignments can be found in sample_name/bowtie2/*sorted.bam. Those files can be loaded in genome browser such as IGV. Yet, it may be slow, and bigwig files are provided for you in sample_name/bigwig. Then, you may want to see where are the peaks. Concerning the IDR, a BED file is available in e.g., idr/narrow/combo.bed where combo is e.g. 1_vs_2. Note, however, that this file includes all peaks found in sample 1 and 2. An annotation is available. Consider this examples:</p>
+    intro += """<p>All alignments can be found in sample_name/bowtie2/*sorted.bam. Those files can be loaded in genome browser such as IGV. Yet, it may be slow, and bigwig files are provided for you in sample_name/bigwig. 
+An IGV XML file is provided (igv.xml) that preloads the bigwig and individual peaks (on replicates). 
+
+IDR are to be found in IDR directory (NT stands for Number True replicates).
+
+    Then, you may want to see where are the peaks. Concerning the IDR, a BED file is available in e.g., idr/narrow/combo.bed where ombo ible. Consider this example:</p>
 <pre>
-NC_002505.1	139	352	Interval_0	1	+
-NC_002505.1	134754	135025	Interval_1	1	+
-NC_002505.1	168146	168420	Interval_2	1	+
-NC_002505.1	206245	206544	Interval_3	1	+
-NC_002505.1	264138	264318	Interval_4	1	+
-NC_002505.1	383537	383747	Interval_5	1	+
-NC_002505.1	544259	545082	Interval_9	3	+
-NC_002505.1	644259	645082	Interval_9	2	+
+NC_002505.1	139	352	Interval_0	1
+NC_002505.1	134754	135025	Interval_1	1
+NC_002505.1	168146	168420	Interval_2	1
+NC_002505.1	206245	206544	Interval_3	1
+NC_002505.1	264138	264318	Interval_4	1
+NC_002505.1	383537	383747	Interval_5	1
+NC_002505.1	544259	545082	Interval_9	3
+NC_002505.1	644259	645082	Interval_9	2
 </pre>
 
 <p>The first column is the contig/chrosome. The second and third are start/stop position of the peak. fifth column is a unique ID and next columns contains the value 1,2 or 3. 1 means found in replicate 1, 2 found in replicate 2 only, and 3 found in both replicates</p>
