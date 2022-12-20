@@ -54,6 +54,13 @@ mapping:
                 type: bool
                 required: true
 
+    "igv":
+        type: map
+        mapping:
+            "do":
+                type: bool
+                required: True
+
     "trimming":
       type: map
       mapping:

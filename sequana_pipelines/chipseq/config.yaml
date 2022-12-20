@@ -107,7 +107,16 @@ trimming:
     do: true
 
 
+igv:
+  do: true
 
+
+#######################################################
+# black list 
+#
+# use a BED3 file with tabulated file with 3 columns
+# chromosome name, start position end position
+# 
 remove_blacklist:
     do: false
     blacklist_file: 
@@ -174,13 +183,13 @@ phantom:
 # - remove: If true do not write duplicates to the output file instead of writing them with
 #            appropriate flags set.  Default value: false. This option can be set to 'null' to clear
 #            the default value. Possible values: {true, false}
-# - tmpdir: write tempory file on this directory (default TMP_DIR=/tmp/, but could be "TMP_DIR=/local/scratch/")
 #
 mark_duplicates:
     do: false
     remove: false ## may be True
-    tmpdir: ./tmp/
     threads: 4
+    resources:
+        mem: 8G
 
 #############################################################################
 # IDR computation

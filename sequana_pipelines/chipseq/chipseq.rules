@@ -7,11 +7,6 @@
 #  Documentation: http://sequana.readthedocs.io
 #  Contributors:  https://github.com/sequana/sequana/graphs/contributors
 ##############################################################################
-
-
-#TODO:  multiBigwigSummary bins -b list bam file separated by spaces  -o test.npz -bs 10000 
-#Number of bins found: 1437
-#plotCorrelation --corData test.npz  --corMethod pearson -p heatmap --plotFile test.png  --zMin 0.8
 import shutil
 import os
 from os.path import join
@@ -31,40 +26,62 @@ configfile: "config.yaml"
 # ================================================== The sequana pipeline manager
 manager = sm.PipelineManager("chipseq", config)
 
+# convenient alias
+aligner = manager.config.general.aligner
 
+
+# expected output
 expected_output = []
-
-
-__data__input = manager.getrawdata()
-
-
 rule chipseq:
-    input: "multiqc/multiqc_report.html", ".sequana/rulegraph.svg"
+    input: "multiqc/multiqc_report.html", ".sequana/rulegraph.svg", "output/qc_plots.done"
 
 
-# Let us copy the ref/annotation files locally (redundant but so useful 
-# for distributing, reproducing).
-genome_directory = os.path.abspath(config["general"]["genome_directory"])
-genome_name = genome_directory.rsplit("/", 1)[1]
+# Let us extract useful filenames
+genome_directory = Path(os.path.abspath(config["general"]["genome_directory"]))
+fasta_file = genome_directory / f"{genome_directory.name}.fa"
+gff_file   = genome_directory / f"{genome_directory.name}.gff"
 
 
-
-#
-prefix_name = genome_directory + "/" + genome_name
-fasta_file = prefix_name + ".fa"
-gff_file   = prefix_name + ".gff"
-
-
+# we check the design by reading it
 from sequana_pipelines.chipseq.tools import ChIPExpDesign
 cc = ChIPExpDesign(config["general"]["design_file"])
 design = cc.get_IP_versus_control()
 
 
-
-
+# ======================================================================= utility functions
 def copy_no_data_image(output):
+    """Sometimes, images are not created. We then copy a no_data image. """
     no_data = sequana_data("no_data.png")
     shutil.copy(no_data, output)
+
+
+def get_final_bam_location(sample="{sample}"):
+    """return BAM file location (to be used for peak detection)"""
+
+    if manager.config.remove_blacklist.do:
+        return  f"{sample}/blacklist/{sample}.sorted.bam"
+    elif config["mark_duplicates"]["do"]:
+        return f"{sample}/mark_duplicates/{sample}.sorted.bam"
+    else:
+        aligner = manager.config.general.aligner
+        return f"{sample}/{aligner}/{sample}.sorted.bam"
+
+
+def get_IP_macs3(wildcards):
+    IP = design[wildcards.comp]['IP']
+    return get_final_bam_location(IP)
+    #return f"{IP}/{aligner}/{IP}.sorted.bam"
+
+
+def get_control_macs3(wildcards):
+    ctrl = design[wildcards.comp]['control']
+    return get_final_bam_location(ctrl)
+    #return f"{ctrl}/{aligner}/{ctrl}.sorted.bam"
+
+
+def get_idr_NT_input(wildcards):
+    NT_inputs = cc.get_idr_NT_inputs()[wildcards.condition]
+    return (f"macs3/{wildcards.broad_narrow}/{x}_peaks.{wildcards.broad_narrow}Peak" for x in NT_inputs)
 
 
 # ============================================================================ bowtie2 index
@@ -94,7 +111,7 @@ if manager.config.general.aligner == "bowtie2":
          logger.warning(f"Could not determine bowtie2 version. Index will be stored in {genome_directory}/bowtie2/")
          bowtie2_version = ""
 
-    bowtie2_index = f"{genome_directory}/bowtie2{bowtie2_version}/{genome_name}"
+    bowtie2_index = f"{genome_directory}/bowtie2{bowtie2_version}/{genome_directory.name}"
 
     if os.path.exists(f"{bowtie2_index}.1.{bt2_ext}"):
         pass # index exists, no need to do it, everything should be fine
@@ -216,7 +233,7 @@ if manager.config.general.aligner == "bowtie2":
                  ".rev.2.bt2",
              ),
         output:
-            bam="{sample}/bowtie2/{sample}.sorted.bam",
+            bam="{sample}/bowtie2/{sample}.sorted.bam"
         log:
             "{sample}/bowtie2/{sample}.log"
         params:
@@ -230,69 +247,94 @@ if manager.config.general.aligner == "bowtie2":
         wrapper:
             f"{sequana_wrapper_branch}/wrappers/bowtie2/align"
 
-    __mapping_output = "{sample}/bowtie2/{sample}.sorted.bam"
-
-    DATA = __mapping_output
-
 
 # ===================================================== mark duplicates
 # duplicates can be from PCR or if SR, by pure chance; if Paired, most likely a PCR origin.
 # Mark duplicates
-if config["mark_duplicates"]["do"]:
+rule mark_duplicates:
+    input:
+        f"{{sample}}/{aligner}/{{sample}}.sorted.bam"
+    output:
+        bam = "{sample}/mark_duplicates/{sample}.sorted.bam",
+        metrics = "{sample}/mark_duplicates/{sample}.sorted.metrics",
+    log:
+        out = "{sample}/mark_duplicates/log.out",
+        err = "{sample}/mark_duplicates/log.err"
+    params:
+        remove_dup = "false",
+        tmpdir = "{sample}/mark_duplicates/tmp"
+    threads:
+        config['mark_duplicates']['threads']
+    container:
+        config["apptainers"]["sequana_tools"]
+    resources:
+        **config['mark_duplicates']['resources']
+    wrapper:
+        f"{sequana_wrapper_branch}/wrappers/mark_duplicates"
 
-    rule mark_duplicates:
-        input:
-            "{sample}/bowtie2/{sample}.sorted.bam",
-        output:
-            bam = "{sample}/mark_duplicates/{sample}.sorted.markdup.bam",
-            metrics = "{sample}/mark_duplicates/{sample}.sorted.markdup.metrics",
-        log:
-            out = "{sample}/mark_duplicates/log.out",
-            err = "{sample}/mark_duplicates/log.err"
-        params:
-            remove_dup = "false",
-            tmpdir = "{sample}/mark_duplicates/tmp"
-        container:
-            config["apptainers"]["sequana_tools"]
-        resources:
-            **config['mark_duplicates']['resources']
-        wrapper:
-            f"{sequana_wrapper_branch}/wrappers/mark_duplicates"
-    __final_bam__ = "{sample}/mark_duplicates/{sample}.sorted.markdup.bam"
-    DATA = __final_bam__
 
-# ===================================================== blaclist
-if manager.config.remove_blacklist.do:
-    if os.path.exists(manager.config.remove_blacklist.blacklist_file):
+# ===================================================== blacklist
 
-        rule remove_blacklist:
-            input:
-                bam=DATA,
-                blacklist=config["remove_blacklist"]["blacklist_file"]
-            output:
-                bam="{sample}/blacklist/{sample}.sorted.bam"
-            log:
-                out="{sample}/blacklist/{sample}.out",
-                err="{sample}/blacklist/{sample}.err",
-            container:
-                config["apptainers"]["sequana_tools"]
-            shell:
-                """
-                # blacklist elements found in the input BED3 file.
-                (intersectBed -v -abam {input.bam} -b {input.blacklist} > {output.bam}) && (samtools index {output.bam}) > {log.out} 2>{log.err}
-                """
+rule remove_blacklist:
+    input:
+        bam="{sample}/mark_duplicates/{sample}.sorted.bam",
+        blacklist=config["remove_blacklist"]["blacklist_file"]
+    output:
+        bam="{sample}/blacklist/{sample}.sorted.bam"
+    log:
+        out="{sample}/blacklist/{sample}.out",
+        err="{sample}/blacklist/{sample}.err",
+    container:
+        config["apptainers"]["sequana_tools"]
+    shell:
+        """
+        # blacklist elements found in the input BED3 file.
+        (intersectBed -v -abam {input.bam} -b {input.blacklist} > {output.bam}) && (samtools index {output.bam}) > {log.out} 2>{log.err}
+        """
 
-        DATA = "{sample}/blacklist/{sample}.sorted.bam"
 
-if config["mark_duplicates"]["do"]:
-    DATA_LOCATION = "mark_duplicates"
-else:
-    DATA_LOCATION = "bowtie2"
+# ========================================================= plotCorrelation
+
+rule plotCorrelation_npz:
+    input:
+        expand(
+            "{sample}/bigwig/{sample}.bigwig",
+             sample=manager.samples)
+    output:
+        "outputs/data.npz"
+    params:
+        bins=10000
+    log:
+        "logs/plotCorrelation.log"
+    container:
+        config["apptainers"]["sequana_tools"]
+    shell:
+        """
+        multiBigwigSummary bins -b {input}  -o {output} -bs {params.bins} > {log}
+        """
+
+
+rule plotCorrelation:
+    input:
+        "outputs/data.npz"
+    output:
+        "outputs/correlation.png"
+    params:
+        zMin=0
+    log:
+        "logs/plotCorrelation.log"
+    container:
+        config["apptainers"]["sequana_tools"]
+    shell:
+        """
+        plotCorrelation  --corData {input} --corMethod pearson -p heatmap --plotFile {output} --zMin {params.zMin} 1>>{log} 2>>{log}
+        """
 
 
 # ===================================================== phantom detection using spp
 rule phantom_spp:
-    input: DATA
+    input:
+        f"{{sample}}/{aligner}/{{sample}}.sorted.bam"
     output:
         pdf= "{sample}/phantom_spp/spp.pdf",
         rdata= "{sample}/phantom_spp/spp.Rdata",
@@ -307,14 +349,16 @@ rule phantom_spp:
         """
         run_spp.R -c={input} -savp={output.pdf} -savd={output.rdata}  -out={output.out} -p={threads} -rf 1>{log.out} 2>{log.err}
         """
+expected_output += expand("{sample}/phantom_spp/spp.pdf", sample=manager.samples)
+
 
 # ===================================================== phantom detection using sequana
 
-rule phamtom_align:
+rule phantom_align:
     input:
-        DATA
+        f"{{sample}}/{aligner}/{{sample}}.sorted.bam"
     output:
-        align= DATA + ".align"
+        align=f"{{sample}}/{aligner}/{{sample}}.sorted.align"
     container:
         config["apptainers"]["samtools"]
     shell:
@@ -327,7 +371,7 @@ rule phamtom_align:
 
 rule phantom:
     input:
-        align= DATA + ".align"
+        align=f"{{sample}}/{aligner}/{{sample}}.sorted.align"
     output:
         png= "{sample}/phantom/phantom.png",
         json= "{sample}/phantom/phantom.json",
@@ -351,16 +395,13 @@ rule phantom:
         savefig(output.png)
 
 expected_output += expand("{sample}/phantom/phantom.png", sample=manager.samples)
-expected_output += expand("{sample}/phantom_spp/spp.pdf", sample=manager.samples)
-
-
 
 
 # ===================================================== get chrom size file
 rule chrom_sizes:
     input:
         fasta_file
-    output: 
+    output:
         "chrom.sizes"
     container:
         config["apptainers"]["sequana_tools"]
@@ -380,7 +421,7 @@ rule chrom_sizes:
 # --JDSSample + controls
 rule fingerprints:
     input:
-        expand(DATA, sample=manager.samples)
+        expand("{sample}/{aligner}/{sample}.sorted.bam", sample=manager.samples, aligner=aligner)
     output:
         raw="fingerprints/plotFingerprint.raw.txt",
         metrics="fingerprints/plotFingerprint.qcmetrics.txt",
@@ -411,7 +452,7 @@ if config['fingerprints']['do']:
 #
 rule bam_to_bed:
     input:
-        DATA
+        get_final_bam_location("{sample}")
     output:
         bedgraph=temp("{sample}/bigwig/{sample}.bedGraph"),
     params:
@@ -437,23 +478,6 @@ rule bed_to_bigwig:
         """
         bedGraphToBigWig {input.bedgraph} {input.chrom_sizes} {output.bigwig}
         """
-
-expected_output.extend(expand("{sample}/bigwig/{sample}.bigwig", sample=manager.samples))
-
-
-def get_IP_macs3(wildcards):
-    IP = design[wildcards.comp]['IP']
-    return f"{IP}/bowtie2/{IP}.sorted.bam"
-
-
-def get_control_macs3(wildcards):
-    ctrl = design[wildcards.comp]['control']
-    return f"{ctrl}/bowtie2/{ctrl}.sorted.bam"
-
-
-def get_idr_NT_input(wildcards):
-    NT_inputs = cc.get_idr_NT_inputs()[wildcards.condition]
-    return (f"macs3/{wildcards.broad_narrow}/{x}_peaks.{wildcards.broad_narrow}Peak" for x in NT_inputs)
 
 
 # ===================================================== macs3
@@ -504,7 +528,7 @@ expected_output += expand("macs3/{mode}/{comp}_venn.png", mode=['broad','narrow'
 # ===================================================== FRiP
 rule FRiP:
     input:
-        bamfiles=expand("{sample}/{DATA_LOCATION}/{sample}.sorted.bam", sample=manager.samples, DATA_LOCATION=DATA_LOCATION),
+        bamfiles=expand("{sample}/{aligner}/{sample}.sorted.bam", sample=manager.samples, aligner=aligner),
         peaks ="macs3/{broad_narrow}/{comparison}_peaks.{broad_narrow}Peak",
     output: "macs3/{broad_narrow}/{comparison}_FRiP.txt"
     threads: 1
@@ -543,8 +567,25 @@ rule plot_FRiP:
             c.plot()
             from pylab import savefig
             savefig(f"FRiP/{wildcards.broad_narrow}/{k}_FRiP.png")
-expected_output += expand("FRiP/narrow/{comparison}_FRiP.png", comparison=design.keys())
-expected_output += expand("FRiP/broad/{comparison}_FRiP.png", comparison=design.keys())
+
+
+
+rule QC_plots:
+    input:
+        frip=expand("FRiP/{broad_narrow}/{comparison}_FRiP.png", comparison=design.keys(), 
+                broad_narrow=['broad','narrow']),
+        correlation="outputs/correlation.png",
+        annotated_peaks=expand("annotate_peaks/{broad_narrow}/{comparison}.png", comparison=design.keys(),
+                broad_narrow=['broad','narrow']),
+        peak_counts=expand("outputs/peak_{broad_narrow}_counts.png", broad_narrow=['broad','narrow']),
+        phantom= expand("{sample}/phantom/phantom.png", sample=manager.samples)
+    output:
+        "output/qc_plots.done"
+    shell:
+        """
+        touch {output}
+        """
+
 
 
 # ============================================================== annotation
@@ -580,8 +621,6 @@ rule plot_annotated_peaks:
         h.pie_annotation()
         savefig(output[0], dpi=200)
 
-expected_output += [f"annotate_peaks/narrow/{k}.png" for k in design.keys()]
-expected_output += [f"annotate_peaks/broad/{k}.png" for k in design.keys()]
 
 
 ########################### IDR ###############################################
@@ -637,7 +676,7 @@ if config['idr']['do']:
     # =========================================================================
     rule self_pseudo_replicates_data:
         input:
-            "IP_{condition}_rep{rep}/bowtie2/IP_{condition}_rep{rep}.sorted.bam"
+            get_final_bam_location("IP_{condition}_rep{rep}")
         output:
             tmp_header=temp("SPR_IDR/{condition}_rep{rep}_SPR{N}_header.txt"),
             tmp_split0=temp("SPR_IDR/{condition}_rep{rep}_SPR{N}00"),
@@ -667,7 +706,7 @@ if config['idr']['do']:
     rule self_pseudo_replicate_peaks:
         input:
             inputs="SPR_IDR/{condition}_rep{rep}_rep{rep2}_SPR{N}.bam",
-            controls = "Input_{condition}/bowtie2/Input_{condition}.sorted.bam"
+            controls=get_final_bam_location("Input_{condition}")
         output:
             "SPR_IDR/macs3/{broad_narrow}/{condition}_rep{rep}_rep{rep2}_SPR{N}_peaks.{broad_narrow}Peak"
         params:
@@ -680,7 +719,7 @@ if config['idr']['do']:
             qvalue          = config['macs3']['qvalue'],
             mode            = "{broad_narrow}"
         log:
-            "SPR_IDR/macs3/{broad_narrow}/{condition}_rep{rep}_rep{rep2}_SPR{N}.log"
+            "SPR_IDR/macs3/{broad_narrow}/{condition}_rep{rep}_rep{rep2}_SPR{N}.out"
         wrapper:
             f"{sequana_wrapper_branch}/wrappers/macs3"
 
@@ -693,12 +732,15 @@ if config['idr']['do']:
             "SPR_IDR/idr/{broad_narrow}/{condition}_rep{rep}_SPR{N}.csv"
         params:
             rank=config['idr']['rank'],
-            soft_idr_threshold=config['idr']['soft_idr_threshold'] 
+            soft_idr_threshold=config['idr']['soft_idr_threshold']
         container:
             config['apptainers']['idr']
+        log:
+            out="SPR_IDR/idr/{broad_narrow}/{condition}_rep{rep}_SPR{N}.out",
+            err="SPR_IDR/idr/{broad_narrow}/{condition}_rep{rep}_SPR{N}.err"
         shell:
             """
-            idr --samples {input} --input-file-type {wildcards.broad_narrow}Peak --rank {params.rank} --output-file SPR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_rep{wildcards.rep}_SPR{wildcards.N}  --plot --soft-idr-threshold {params.soft_idr_threshold}
+            idr --samples {input} --input-file-type {wildcards.broad_narrow}Peak --rank {params.rank} --output-file SPR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_rep{wildcards.rep}_SPR{wildcards.N}  --plot --soft-idr-threshold {params.soft_idr_threshold} 1>{log.out} 2>{log.err}
             mv SPR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_rep{wildcards.rep}_SPR{wildcards.N} {output}
            """
     expected_output += expand("SPR_IDR/idr/{broad_narrow}/{condition}_rep{rep}_SPR{N}.csv", broad_narrow=['broad','narrow'], condition=cc.conditions, N=range(1, config['idr'].get('self_pseudo_replicates',1)+1), rep=[1,2])
@@ -710,8 +752,8 @@ if config['idr']['do']:
     rule pseudo_replicate_data:
         input:
             bamfiles=[
-                "IP_{condition}_rep1/bowtie2/IP_{condition}_rep1.sorted.bam",
-                "IP_{condition}_rep2/bowtie2/IP_{condition}_rep2.sorted.bam"]
+                get_final_bam_location("IP_{condition}_rep1"),
+                get_final_bam_location("IP_{condition}_rep2")]
         output:
             tmp_merged_bam=temp("PR_IDR/{condition}_PR{N}.bam"),
             tmp_split0=temp("PR_IDR/{condition}_PR{N}00"),
@@ -749,7 +791,7 @@ if config['idr']['do']:
     rule pseudo_replicate_peaks:
         input:
             inputs="PR_IDR/{condition}_{rep}_PR{N}.bam",
-            controls = "Input_{condition}/bowtie2/Input_{condition}.sorted.bam"
+            controls = get_final_bam_location("Input_{condition}")
         output:
             "PR_IDR/macs3/{broad_narrow}/{condition}_{rep}_PR{N}_peaks.{broad_narrow}Peak"
         params:
@@ -874,8 +916,8 @@ rule plot_peak_count:
             pylab.title(f"{mode}")
             pylab.savefig(f"outputs/peak_{mode}_counts.png", dpi=200)
 
-for mode in ['broad','narrow']:
-    expected_output += [f"outputs/peak_{mode}_counts.png", f"outputs/peak_{mode}_counts.csv"]
+#for mode in ['broad','narrow']:
+#    expected_output += [f"outputs/peak_{mode}_counts.png", f"outputs/peak_{mode}_counts.csv"]
 
 
 if config['idr']['do']:
@@ -925,9 +967,7 @@ if config['idr']['do']:
     rule feature_counts:
         input:
             saf="IDR/{broad_narrow}/{comp}.saf",
-            bamfiles=expand("{sample}/{DATA_LOCATION}/{sample}.sorted.bam",
-                              sample=cc.df.query("type=='IP'").sample_name.values,
-                              DATA_LOCATION=DATA_LOCATION)
+            bamfiles=expand(get_final_bam_location(), sample=cc.df.query("type=='IP'").sample_name.values)
         output:
             "featureCounts/{broad_narrow}/{comp}.feature_counts.out"
         threads: 4
@@ -1064,8 +1104,8 @@ rule igv:
         with open(output.xml, 'w') as fout:
             fout.write(xml)
 
-
-expected_output+= ["igv.xml"]
+if config['igv']['do']:
+    expected_output+= ["igv.xml"]
 
 
 
@@ -1351,10 +1391,6 @@ onsuccess:
         intro += "</tr>"
 
     intro +="""</table>"""
-
-
-
-
 
 
     intro += """<h2>Final information</h2>"""
