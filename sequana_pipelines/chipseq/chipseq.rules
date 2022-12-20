@@ -349,7 +349,8 @@ rule phantom_spp:
         """
         run_spp.R -c={input} -savp={output.pdf} -savd={output.rdata}  -out={output.out} -p={threads} -rf 1>{log.out} 2>{log.err}
         """
-expected_output += expand("{sample}/phantom_spp/spp.pdf", sample=manager.samples)
+if config['phantom']['use_spp']:
+    expected_output += expand("{sample}/phantom_spp/spp.pdf", sample=manager.samples)
 
 
 # ===================================================== phantom detection using sequana
@@ -393,8 +394,6 @@ rule phantom:
             json.dump(stats, fout)
 
         savefig(output.png)
-
-expected_output += expand("{sample}/phantom/phantom.png", sample=manager.samples)
 
 
 # ===================================================== get chrom size file
