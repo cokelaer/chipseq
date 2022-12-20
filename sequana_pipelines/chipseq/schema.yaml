@@ -179,8 +179,6 @@ mapping:
                 type: bool
             "remove":
                 type: bool
-            "tmpdir":
-                type: str
             "threads":
                 type: int
                 required: True
