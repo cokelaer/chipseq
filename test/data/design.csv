@@ -1,0 +1,4 @@
+type,condition,replicat,sample_name
+IP,    yeiL, 1, IP_yeiL_rep1
+IP,    yeiL, 2, IP_yeiL_rep2
+Input, yeiL, 1, Input_yeiL

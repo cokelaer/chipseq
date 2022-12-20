@@ -5,10 +5,213 @@ type: map
 mapping:
     "input_directory":
         type: str
-        required: False
+        required: True
     "input_readtag":
         type: str
         required: False
     "input_pattern":
         type: str
-        required: False
+        required: True
+    "apptainers":
+        type: any
+
+
+    "fastqc":
+        type: map
+        mapping:
+            "skip_fastqc_raw":
+                type: bool
+                required: True
+            "options":
+                type: str
+                required: True
+            "threads":
+                type: int
+                required: True
+                range: { min: 1 }
+            "resources":
+                type: any
+                required: true
+
+
+    "general":
+        type: map
+        mapping:
+            "aligner":
+                type: str
+                enum: [bowtie2]
+            "genome_directory":
+                required: True
+                type: str
+            "design_file":
+                type: str
+                required: True
+
+    "phantom":
+        type: map
+        mapping:
+            "use_spp":
+                type: bool
+                required: true
+
+    "igv":
+        type: map
+        mapping:
+            "do":
+                type: bool
+                required: True
+
+    "trimming":
+      type: map
+      mapping:
+        "do":
+          type: bool
+          required: True
+        "software_choice":
+          type: str
+          enum: [fastp]
+
+    "fastp":
+      type: map
+      mapping:
+        "options":
+            type: str
+        "minimum_length":
+            required: True
+            type: int
+        "adapters":
+            type: str
+            required: False
+        "quality":
+            type: int
+            range: {max: 40, min: 0}
+            required: False
+        "threads":
+            type: int
+            required: True
+            range: { min: 1 }
+        "disable_adapter_trimming":
+                type: bool
+        "disable_quality_filtering":
+                type: bool
+
+    "macs3":
+        type: map
+        mapping:
+            "bandwidth":
+                type: int
+                range: { min: 10 }
+            "broad_cutoff":
+                type: float
+            "genome_size":
+                type: int
+                range: { min: 10 }
+            "options":
+                type: str
+            "qvalue":
+                type: float
+                range: { min: 0, max: 1 }
+            "read_length":
+                type: int
+                range: { min: 35 }
+
+
+    "igvtools":
+        type: map
+        mapping:
+            "do":
+                type: bool
+            "chrom_sizes_file":
+                type: str
+  
+    'bowtie2_mapping':
+        type: map
+        mapping:
+            "options":
+                type: str
+            "threads":
+                type: int
+                required: True
+                range: { min: 1}
+            "genome_size_larger_than_4gb":
+                type: bool
+            "resources":
+                type: any
+                required: true
+
+    'bowtie2_index':
+        type: map
+        mapping:
+            "options":
+                type: str
+            "threads":
+                type: int
+                required: True
+                range: { min: 1}
+            "resources":
+                type: any
+                required: true
+
+
+    "fingerprints":
+        type: map
+        mapping:
+            "do":
+              type: bool
+            "bins":
+                type: int
+
+    "remove_blacklist":
+        type: map
+        mapping:
+            "do":
+                type: bool
+            "threads":
+                type: int
+                range: { min: 1}
+            "blacklist_file":
+                type: str
+
+    'mark_duplicates':
+        type: map
+        mapping:
+            "do":
+                type: bool
+            "remove":
+                type: bool
+            "tmpdir":
+                type: str
+            "threads":
+                type: int
+                required: True
+                range: { min: 1, max: 8 }
+
+    "idr":
+        type: map
+        mapping:
+            "do":
+                type: bool
+            "pseudo_replicates":
+                type: int
+            "self_pseudo_replicates":
+                type: int
+            "rank":
+                 type: str
+                 enum: ['signal.value', "p.value", "q.value"]
+            "soft_idr_threshold":
+                 type: float
+
+
+    "multiqc":
+        type: map
+        mapping:
+            "options":
+                type: str
+            "modules":
+                type: str
+            "config_file":
+                type: str
+            "input_directory":
+                type: str
+            "output_directory":
+                type: str
