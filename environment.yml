@@ -1,0 +1,21 @@
+name: sequana_rnaseq
+
+channels:
+- conda-forge
+- bioconda
+- defaults
+- r
+
+dependencies:
+- samtools>1.7
+- bamtools
+- bedtools
+- bowtie2>=2.3
+- fastqc
+- subread
+- fastp
+- deeptools
+- picard>2.20
+- ucsc-bedgraphtobigwig
+- homer
+- igv
