@@ -5,13 +5,34 @@ on:
     branches:
       - main
       - dev
-  workflow_dispatch:      
+  workflow_dispatch:
   pull_request:
     branches-ignore: []
   schedule:
     - cron: '0 0 * * SUN'
 
 jobs:
+
+  artifact-build:
+    name: build artifact for singularity
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - run: |
+        mkdir ~/images
+        wget https://zenodo.org/record/7341710/files/sequana_tools_0.14.5.img -o ~/images/866bf0d2f8f9f5cd879ea6cc4bcc4d20.simg
+        wget https://zenodo.org/record/7015004/files/fastqc_0.11.9-py3.img -o ~/images/6f85434c1b6d53acca83370ff66a2f58.simg
+        wget https://zenodo.org/record/7319782/files/fastp_0.23.2.img -o ~/images/1e2c1ad5cf2f805cbab059bc459f5274.simg
+        wget https://zenodo.org/record/7301453/files/phantompeakqualtools_1.2.2.img -o ~/images/08e89f4bf34a9b87c5ef083a395f9406.simg
+        wget https://zenodo.org/record/7305501/files/homer_4.11.0.img -o ~/images/d1a3841af715bb324316716bc83a0a02.simg
+        wget https://zenodo.org/record/7437898/files/samtools_1.16.1.img -o ~/images/867efcb6711b41d5e65229a428f8bb32.simg
+
+      - uses: actions/upload-artifact@v2
+        with:
+          name: preloaded-apptainers
+          path: ~/images
+
   build-linux:
     runs-on: ubuntu-latest
     strategy:
@@ -20,13 +41,18 @@ jobs:
         python: [3.7, 3.8, 3.9]
       fail-fast: false
 
-
     steps:
 
     - name: precleanup
       run: |
         sudo rm -rf /usr/share/dotnet
         sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
+    - name: artifacts
+      uses: actions/download-artifacts@v2
+      with: 
+        name: preloaded-apptainers
+
     - name: install graphviz
       run: |
         sudo apt-get install -y graphviz
@@ -58,7 +84,7 @@ jobs:
 
     - name: testing
       run: |
-        sequana_chipseq --design test/data/design.csv --input-directory test/data/ --use-apptainer  --genome-directory test/data/ecoli_MG1655 && cd chipseq && sh chipseq.sh
+        sequana_chipseq --design test/data/design.csv --input-directory test/data/ --use-apptainer --apptainer-prefix ~/images --genome-directory test/data/ecoli_MG1655 && cd chipseq && sh chipseq.sh
 
 
 
