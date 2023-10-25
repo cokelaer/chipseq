@@ -114,6 +114,8 @@ sp:
         fn: '*Log.final.out'
     cutadapt:
         fn: 'cutadapt.txt'
+    fastp:
+        fn: '*fastp*json'
 
 # Overwrite the defaults of which table columns are visible by default
 #

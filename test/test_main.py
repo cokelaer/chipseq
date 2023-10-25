@@ -26,7 +26,6 @@ def test_full(tmp_path):
     wkdir = tmp_path / "test"
     wkdir.mkdir()
 
-    
     cmd = f"sequana_chipseq --input-directory {datadir} --genome-directory {genomedir} --working-directory {str(wkdir)} --force --design-file {datadir}/design.csv"
 
     print(cmd)

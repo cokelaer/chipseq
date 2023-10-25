@@ -77,11 +77,11 @@ control, EXP1,      1, Input_EXP1
 
 
         """
-        individuals = self.get_IP_versus_control()
-        # build a new name from replicates
-        conditions = [x.rsplit("_",1)[0] for x in individuals.keys()]
-        results = {}
-        for condition in conditions:
-            results[condition] = [x for x in individuals.keys() if x.startswith(condition)]
-        return results
+        from collections import defaultdict
+        results = defaultdict(list)
+
+        for IP in self.get_IP_versus_control().keys():
+            condition = IP.rsplit("_",1)[0]
+            results[condition].append(IP)
+        return dict(results)
 

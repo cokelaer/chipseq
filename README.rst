@@ -84,6 +84,10 @@ Changelog
 ========= ====================================================================
 Version   Description
 ========= ====================================================================
+0.10.0    * Fix design in case of samples that starts with same prefix
+          * Include final IDR plots and tables
+          * Fix containers and wrappers in the config file
+          * Better HTML report
 0.9.1     * Fix requirements and setup.py (remove wrong idr package)
 0.9.0     * use latest wrappers and apptainer (for rulegraph)
 0.8.0     **First release.**
