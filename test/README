@@ -1,0 +1,5 @@
+sequana_chipseq --input-directory data/ \
+    --genome-directory data/ecoli_MG1655/ \
+    --design-file data/design.csv --monitor \
+    --force --apptainer-prefix ~/images
+

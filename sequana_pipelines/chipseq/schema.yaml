@@ -1,8 +1,6 @@
 
 type: map
 mapping:
-    "sequana_wrappers":
-        type: str
     "input_directory":
         type: str
         required: True
@@ -12,6 +10,9 @@ mapping:
     "input_pattern":
         type: str
         required: True
+    "exclude_pattern":
+        type: str
+        required: False
     "apptainers":
         type: any
 

@@ -4,13 +4,13 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "sequana-chipseq"
-version = "0.11.0"
+version = "0.12.0"
 description = "A ChIP-seq pipeline from raw reads to peaks"
 authors = ["Sequana Team"]
 license = "BSD-3"
-repository = "https://github.com/sequana/rnaseq"
+repository = "https://github.com/sequana/chipseq"
 readme = "README.rst"
-keywords = ["snakemake, sequana, RNAseq, RNADiff, differential analysis"]
+keywords = ["snakemake, sequana, ChIP-seq, differential analysis"]
 classifiers = [
         "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Education",
@@ -19,9 +19,9 @@ classifiers = [
         "Intended Audience :: Science/Research",
         "License :: OSI Approved :: BSD License",
         "Operating System :: POSIX :: Linux",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "Topic :: Software Development :: Libraries :: Python Modules",
         "Topic :: Scientific/Engineering :: Bio-Informatics",
         "Topic :: Scientific/Engineering :: Information Analysis",
@@ -33,7 +33,7 @@ packages = [
 
 
 [tool.poetry.dependencies]
-python = ">=3.8,<4.0"
+python = ">=3.10,<4.0"
 sequana = ">=0.16.0"
 sequana_pipetools = ">=0.16.4"
 click-completion = "^0.5.2"
