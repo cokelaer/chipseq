@@ -52,7 +52,10 @@ def test_full(tmp_path):
     subprocess.call(cmd.split())
     assert os.path.exists(wkdir / "config.yaml")
 
-    stat = subprocess.call("sh chipseq.sh".split(), cwd=wkdir)
+    stat = subprocess.call(
+        "snakemake -s chipseq.rules -p --cores 4".split(),
+        cwd=wkdir
+    )
 
     assert os.path.exists(wkdir / "summary.html")
 
