@@ -18,7 +18,10 @@ dependencies:
 - picard>2.20
 - ucsc-bedgraphtobigwig
 - homer
-- igv
+- macs3
+- idr
+- multiqc
+- snakemake-minimal
 - pip:
   - sequana
 

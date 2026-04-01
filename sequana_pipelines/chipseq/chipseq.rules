@@ -726,7 +726,10 @@ if config['idr']['do']:
                 dd.to_csv(output.peaks, index=False, sep="\t", header=False)
             else:
                 for filename in output:
-                    copy_no_data_image(str(filename))
+                    if str(filename).endswith(".csv") or str(filename).endswith("Peak"):
+                        open(str(filename), "w").close()  # empty file
+                    else:
+                        copy_no_data_image(str(filename))
 
 
     expected_output += expand("IDR/{broad_narrow}/{condition}_ranks.png",
