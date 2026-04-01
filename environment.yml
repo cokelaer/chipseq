@@ -24,4 +24,5 @@ dependencies:
 - snakemake-minimal
 - pip:
   - sequana
+  - sequana-wrappers>=26.3.21
 
