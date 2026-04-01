@@ -1129,10 +1129,10 @@ if config['idr']['do']:
                 c = IDR(filename)
                 if "/narrow/" in filename:
                     narrow['N'].append(len(c.df))
-                    narrow['Ns'].append(c.N_significant_peaks)
+                    narrow['Ns'].append(c.N_significant_peaks or 0)
                 elif "/broad/" in filename:
                     broad['N'].append(len(c.df))
-                    broad['Ns'].append(c.N_significant_peaks)
+                    broad['Ns'].append(c.N_significant_peaks or 0)
 
             f, axes = pylab.subplots(1,2, figsize=(10,6))
 
