@@ -36,6 +36,7 @@ packages = [
 python = ">=3.10,<4.0"
 sequana = ">=0.21.0"
 sequana_pipetools = ">=1.5.3"
+sequana_wrappers = ">=26.3.21"
 click-completion = "^0.5.2"
 
 
