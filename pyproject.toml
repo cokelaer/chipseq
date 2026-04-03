@@ -38,7 +38,7 @@ sequana = ">=0.21.0"
 sequana_pipetools = ">=1.5.3"
 sequana_wrappers = ">=26.3.21"
 click-completion = "^0.5.2"
-idr = {git = "https://github.com/sequana/idr"}
+idrix = ">=2.1.0"
 
 
 [tool.poetry.scripts]
