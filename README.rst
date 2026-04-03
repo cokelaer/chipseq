@@ -17,9 +17,9 @@ This is the **chipseq** pipeline from the `Sequana <https://sequana.readthedocs.
 
 :Overview: ChIP-seq pipeline from raw reads to peaks, IDR statistics, and functional annotation
 :Input: Paired or single-end FastQ files and a CSV experimental design file
-:Output: HTML summary report, narrow/broad peak files, IDR statistics, bigwig tracks, and annotation tables
+:Output: HTML summary report, narrow/broad peak files, IDR statistics, bigwig tracks, annotation tables, and IGV session file
 :Status: Production
-:Citation: Cokelaer et al, (2017), 'Sequana': a Set of Snakemake NGS pipelines, Journal of Open Source Software, 2(16), 352, JOSS DOI https://doi:10.21105/joss.00352
+:Citation: Cokelaer et al, (2017), 'Sequana': a Set of Snakemake NGS pipelines, Journal of Open Source Software, 2(16), 352, JOSS DOI https://doi.org/10.21105/joss.00352
 
 
 .. image:: sequana_pipelines/chipseq/dag.png
@@ -149,8 +149,9 @@ The following tools must be available (install via conda/bioconda)::
 - **fastp** — adapter trimming and quality filtering
 - **fastqc** — per-read quality control
 - **samtools** — BAM sorting, indexing, and flagstat
-- **deeptools** — bigwig generation (genomeCoverageBed) and fingerprint QC
-- **ucsc-bedgraphtobigwig** — bedGraph to bigWig conversion
+- **bedtools** — bedGraph generation from BAM files (``genomeCoverageBed``)
+- **ucsc-bedgraphtobigwig** — bedGraph to bigWig conversion (``bedGraphToBigWig``)
+- **deeptools** — fingerprint QC (``plotFingerprint``) and multi-sample bigwig summary (``multiBigwigSummary``)
 - **macs3** — narrow and broad peak calling
 - **homer** — peak annotation (``annotatePeaks.pl``)
 - **idr** — Irreproducibility Discovery Rate between replicates (installed from
@@ -167,7 +168,7 @@ Pipeline overview
 3. **Alignment** — bowtie2 maps reads to the reference genome.
 4. **[Optional] Mark duplicates** — Picard marks PCR duplicates.
 5. **[Optional] Blacklist removal** — bedtools removes artefact-prone regions.
-6. **bigwig** — per-sample coverage tracks for genome browsers (e.g. IGV).
+6. **bigwig** — per-sample coverage tracks for genome browsers (bedtools ``genomeCoverageBed`` → UCSC ``bedGraphToBigWig``); an IGV session file (``igv.xml``) is generated to preload all tracks.
 7. **[Optional] Fingerprints** — plotFingerprint QC to assess ChIP enrichment.
 8. **Phantom peak** — strand cross-correlation analysis (NSC, RSC, Qtag scores).
 9. **Peak calling** — macs3 detects narrow and broad peaks for each IP vs Input pair.
@@ -193,6 +194,9 @@ Key sections:
 - ``fingerprints`` — enable/disable and number of bins
 - ``mark_duplicates`` — enable/disable PCR duplicate marking
 - ``remove_blacklist`` — enable/disable and path to BED blacklist
+- ``trimming`` — enable/disable read trimming and choice of trimming tool
+- ``phantom`` — use SPP (``use_spp: true``) instead of the built-in sequana phantom-peak detection
+- ``igv`` — enable/disable generation of the IGV session file (``igv.xml``)
 - ``multiqc`` — MultiQC options
 
 
@@ -202,7 +206,13 @@ Changelog
 ========= ====================================================================
 Version   Description
 ========= ====================================================================
-0.12.0    * Replace bioconda ``idr`` with pip install from ``sequana/idr``
+0.12.0    * Fix ``macs3``, ``self_pseudo_replicate_peaks``, and
+            ``pseudo_replicate_peaks`` rules: macs3 exits non-zero on sparse
+            CI data; added ``|| true`` + conditional ``touch`` so the pipeline
+            continues and downstream rules handle empty peak files gracefully
+          * Add ``container: sequana_tools`` to all macs3 rules so peak
+            calling runs consistently inside the apptainer container
+          * Replace bioconda ``idr`` with pip install from ``sequana/idr``
             fork; fixes CI failures on Python 3.11/3.12 (upstream package
             is Python 3.10-only due to Cython 3.x incompatibility)
           * Fix ``plot_FRiP``: was iterating over all comparisons inside each

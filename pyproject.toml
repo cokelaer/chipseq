@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "sequana-chipseq"
-version = "0.12.1"
+version = "0.12.0"
 description = "A ChIP-seq pipeline from raw reads to peaks"
 authors = ["Sequana Team"]
 license = "BSD-3"

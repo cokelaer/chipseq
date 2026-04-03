@@ -22,8 +22,9 @@ apptainers:
     homer: https://zenodo.org/record/7305501/files/homer_4.11.0.img
     ucsc: https://zenodo.org/record/10011490/files/ucsc_3.7.7.img
     samtools: https://zenodo.org/record/7437898/files/samtools_1.16.1.img
-    idr: https://zenodo.org/record/7305443/files/idr_2.0.3.img
-    multiqc: https://zenodo.org/record/10205070/files/multiqc_1.16.0.img
+    macs3: https://zenodo.org/record/19140702/files/macs3_3.0.4.img
+    idr: https://zenodo.org/record/19391648/files/idr_2.1.0.img
+    multiqc: https://zenodo.org/record/17100751/files/multiqc_1.27.0-zenodo1.img
 
 
 #############################################################################

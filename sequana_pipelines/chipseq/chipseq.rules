@@ -531,8 +531,28 @@ rule macs3:
         outdir          = "macs3/{broad_narrow}"
     log:
         "macs3/{broad_narrow}/{comp}_out.log"
+    container:
+        config['apptainers']['macs3']
     shell:
-        manager.get_shell("macs3/run", "v1")
+        """
+        format_opt="-f BAM"
+        if [ "{params.paired}" = "True" ]; then format_opt="-f BAMPE"; fi
+        broad_opt=""
+        if [ "{params.mode}" = "broad" ]; then
+            broad_opt="--broad --broad-cutoff {params.broad_cutoff}"
+        fi
+        macs3 callpeak -B --SPMR \
+            -t {input.inputs} \
+            -c {input.controls} \
+            -g {params.genome_size} \
+            -n {params.prefix} \
+            --bw {params.bandwidth} \
+            {params.options} \
+            -q {params.qvalue} \
+            $format_opt \
+            $broad_opt \
+            --outdir {params.outdir} > {log} 2>&1
+        """
 
 
 # ===================================================== naive consensus summary
@@ -684,12 +704,8 @@ if config['idr']['do']:
             idr --samples {input} --input-file-type {wildcards.broad_narrow}Peak --rank {params.rank} \
                 --output-file IDR/{wildcards.broad_narrow}/{wildcards.condition} \
                 --plot --soft-idr-threshold {params.soft_idr_threshold} \
-                1>{log.out} 2>{log.err} || true
-            if [ -f "IDR/{wildcards.broad_narrow}/{wildcards.condition}" ]; then
-                mv IDR/{wildcards.broad_narrow}/{wildcards.condition} {output}
-            else
-                touch {output}
-            fi
+                1>{log.out} 2>{log.err}
+            mv IDR/{wildcards.broad_narrow}/{wildcards.condition} {output}
             """
 
     rule plot_idr:
@@ -801,8 +817,28 @@ if config['idr']['do'] and config['idr']['self_pseudo_replicates']:
             outdir          = "SPR_IDR/macs3/{broad_narrow}"
         log:
             "SPR_IDR/macs3/{broad_narrow}/{condition}_rep{rep}_rep{rep2}_SPR{N}.out"
+        container:
+            config['apptainers']['macs3']
         shell:
-            manager.get_shell("macs3/run", "v1")
+            """
+            format_opt="-f BAM"
+            if [ "{params.paired}" = "True" ]; then format_opt="-f BAMPE"; fi
+            broad_opt=""
+            if [ "{params.mode}" = "broad" ]; then
+                broad_opt="--broad --broad-cutoff {params.broad_cutoff}"
+            fi
+            macs3 callpeak -B --SPMR \
+                -t {input.inputs} \
+                -c {input.controls} \
+                -g {params.genome_size} \
+                -n {params.prefix} \
+                --bw {params.bandwidth} \
+                {params.options} \
+                -q {params.qvalue} \
+                $format_opt \
+                $broad_opt \
+                --outdir {params.outdir} > {log} 2>&1
+            """
 
 
     rule self_pseudo_replicate_idr:
@@ -823,12 +859,8 @@ if config['idr']['do'] and config['idr']['self_pseudo_replicates']:
             """
             idr --samples {input} --input-file-type {wildcards.broad_narrow}Peak --rank {params.rank} \
                 --output-file SPR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_rep{wildcards.rep}_SPR{wildcards.N} \
-                --plot --soft-idr-threshold {params.soft_idr_threshold} 1>{log.out} 2>{log.err} || true
-            if [ -f "SPR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_rep{wildcards.rep}_SPR{wildcards.N}" ]; then
-                mv SPR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_rep{wildcards.rep}_SPR{wildcards.N} {output}
-            else
-                touch {output}
-            fi
+                --plot --soft-idr-threshold {params.soft_idr_threshold} 1>{log.out} 2>{log.err}
+            mv SPR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_rep{wildcards.rep}_SPR{wildcards.N} {output}
             """
     expected_output += expand("SPR_IDR/idr/{broad_narrow}/{condition}_rep{rep}_SPR{N}.csv", broad_narrow=['broad','narrow'], condition=cc.conditions, N=range(1, config['idr'].get('self_pseudo_replicates',1)+1), rep=[1,2])
 
@@ -894,8 +926,28 @@ if config['idr']['do'] and config['idr']['pseudo_replicates']:
             outdir          = "PR_IDR/macs3/{broad_narrow}"
         log:
             "PR_IDR/macs3/{broad_narrow}/{condition}_{rep}_PR{N}.log"
+        container:
+            config['apptainers']['macs3']
         shell:
-            manager.get_shell("macs3/run", "v1")
+            """
+            format_opt="-f BAM"
+            if [ "{params.paired}" = "True" ]; then format_opt="-f BAMPE"; fi
+            broad_opt=""
+            if [ "{params.mode}" = "broad" ]; then
+                broad_opt="--broad --broad-cutoff {params.broad_cutoff}"
+            fi
+            macs3 callpeak -B --SPMR \
+                -t {input.inputs} \
+                -c {input.controls} \
+                -g {params.genome_size} \
+                -n {params.prefix} \
+                --bw {params.bandwidth} \
+                {params.options} \
+                -q {params.qvalue} \
+                $format_opt \
+                $broad_opt \
+                --outdir {params.outdir} > {log} 2>&1
+            """
 
 
     rule pseudo_replicate_idr:
@@ -916,12 +968,8 @@ if config['idr']['do'] and config['idr']['pseudo_replicates']:
             """
             idr --samples {input} --input-file-type {wildcards.broad_narrow}Peak --rank {params.rank} \
                 --output-file PR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_PR{wildcards.N} \
-                --plot --soft-idr-threshold {params.soft_idr_threshold} 1>{log.out} 2>{log.err} || true
-            if [ -f "PR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_PR{wildcards.N}" ]; then
-                mv PR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_PR{wildcards.N} {output}
-            else
-                touch {output}
-            fi
+                --plot --soft-idr-threshold {params.soft_idr_threshold} 1>{log.out} 2>{log.err}
+            mv PR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_PR{wildcards.N} {output}
             """
 
     expected_output += expand("PR_IDR/idr/{broad_narrow}/{condition}_PR{N}.csv", broad_narrow=['broad','narrow'], condition=cc.conditions, N=range(1, config['idr'].get('pseudo_replicates',1)+1))
