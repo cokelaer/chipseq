@@ -1,11 +1,9 @@
 name: sequana_chipseq
-
 channels:
 - conda-forge
 - bioconda
 - defaults
 - r
-
 dependencies:
 - samtools>1.7
 - bamtools
@@ -21,7 +19,7 @@ dependencies:
 - macs3
 - multiqc
 - snakemake-minimal
+- pulp>=2.7
 - pip:
   - sequana
   - sequana-wrappers>=26.3.21
-
