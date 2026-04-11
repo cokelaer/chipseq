@@ -290,7 +290,7 @@ rule mark_duplicates:
     threads:
         config['mark_duplicates']['threads']
     container:
-        config["apptainers"]["sequana_tools"]
+        config["apptainers"]["picard"]
     resources:
         **config['mark_duplicates']['resources']
     shell:
@@ -589,28 +589,26 @@ rule FRiP:
         peaks ="macs3/{broad_narrow}/{comparison}_peaks.{broad_narrow}Peak",
     output: "macs3/{broad_narrow}/{comparison}_FRiP.txt"
     threads: 1
-    run:
-
-        # intersect takes only one input BAM. It can take several peak inputs
-        # though. Here, we use one bam input and one peak input
-        import subprocess
-        results = {}
-        for bamfile in sorted(input.bamfiles):
-            cmd = "intersectBed  -a " + bamfile +" -b "+ input.peaks +"  -bed -c -f 0.2|  awk -F '\t' '{sum += $NF; total+=1} END {print sum,total}' "
-            res = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE)
-            in_peaks, count = (res.stdout.strip().decode()).split()
-            count = int(count)
-            FRiP = float(in_peaks) / count
-            results[bamfile] = {'count': count, 'FRiP': FRiP, 'in_peaks': in_peaks}
-
-        with open(output[0], "w") as fout:
-            fout.write("bamfile,count,in_peaks,FRiP,comparison\n")
-            for k, v in results.items():
-                frip = v['FRiP']
-                count = v['count']
-                in_peaks = v['in_peaks']
-                comparison = wildcards.comparison
-                fout.write(f"{k},{count},{in_peaks},{frip},{comparison}\n")
+    log:
+        "macs3/{broad_narrow}/{comparison}_FRiP.log"
+    container:
+        config["apptainers"]["sequana_tools"]
+    shell:
+        """
+        exec 2>{log}
+        echo "bamfile,count,in_peaks,FRiP,comparison" > {output}
+        for bamfile in $(echo {input.bamfiles} | tr ' ' '\\n' | sort); do
+            result=$(intersectBed -a $bamfile -b {input.peaks} -bed -c -f 0.2 | awk -F '\\t' '{{sum += $NF; total+=1}} END {{print sum,total}}')
+            in_peaks=$(echo $result | cut -d' ' -f1)
+            count=$(echo $result | cut -d' ' -f2)
+            if [ "$count" -gt 0 ] 2>/dev/null; then
+                frip=$(awk "BEGIN {{printf \\"%.6f\\", $in_peaks/$count}}")
+            else
+                frip=0
+            fi
+            echo "$bamfile,$count,$in_peaks,$frip,{wildcards.comparison}" >> {output}
+        done
+        """
 
 
 # ===================================================== plot FRiP
