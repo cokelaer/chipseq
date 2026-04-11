@@ -1,6 +1,3 @@
-from importlib.metadata import PackageNotFoundError, version
+import importlib.metadata
 
-try:
-    version = version("sequana-chipseq")
-except PackageNotFoundError:
-    version = "unknown"
+version = importlib.metadata.version("sequana-chipseq")

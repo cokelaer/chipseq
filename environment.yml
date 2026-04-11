@@ -3,7 +3,6 @@ channels:
 - conda-forge
 - bioconda
 - defaults
-- r
 dependencies:
 - samtools>1.7
 - bamtools
@@ -18,8 +17,10 @@ dependencies:
 - homer
 - macs3
 - multiqc
+- graphviz
 - snakemake-minimal
-- pulp>=2.7
+- pulp>=2.8
 - pip:
-  - sequana
-  - sequana-wrappers>=26.3.21
+  - sequana>=0.21.0
+  - sequana_pipetools>=1.5.3
+  - sequana-wrappers>=26.4.1

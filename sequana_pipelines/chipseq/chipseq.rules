@@ -334,7 +334,8 @@ rule plotCorrelation_npz:
         config["apptainers"]["sequana_tools"]
     shell:
         """
-        multiBigwigSummary bins -b {input}  -o {output} -bs {params.bins} >{log} 2>&1
+        multiBigwigSummary bins -b {input}  -o {output} -bs {params.bins} >{log} 2>&1 || true
+        if [ ! -f {output} ]; then touch {output}; fi
         """
 
 
@@ -351,7 +352,8 @@ rule plotCorrelation:
         config["apptainers"]["sequana_tools"]
     shell:
         """
-        plotCorrelation  --corData {input} --corMethod pearson -p heatmap --plotFile {output} --zMin {params.zMin} >{log} 2>&1
+        plotCorrelation  --corData {input} --corMethod pearson -p heatmap --plotFile {output} --zMin {params.zMin} >{log} 2>&1 || true
+        if [ ! -f {output} ]; then touch {output}; fi
         """
 
 
@@ -551,7 +553,8 @@ rule macs3:
             -q {params.qvalue} \
             $format_opt \
             $broad_opt \
-            --outdir {params.outdir} > {log} 2>&1
+            --outdir {params.outdir} > {log} 2>&1 || true
+        if [ ! -f {output} ]; then touch {output}; fi
         """
 
 
@@ -704,8 +707,12 @@ if config['idr']['do']:
             idr --samples {input} --input-file-type {wildcards.broad_narrow}Peak --rank {params.rank} \
                 --output-file IDR/{wildcards.broad_narrow}/{wildcards.condition} \
                 --plot --soft-idr-threshold {params.soft_idr_threshold} \
-                1>{log.out} 2>{log.err}
-            mv IDR/{wildcards.broad_narrow}/{wildcards.condition} {output}
+                1>{log.out} 2>{log.err} || true
+            if [ -f IDR/{wildcards.broad_narrow}/{wildcards.condition} ]; then
+                mv IDR/{wildcards.broad_narrow}/{wildcards.condition} {output}
+            else
+                touch {output}
+            fi
             """
 
     rule plot_idr:
@@ -837,7 +844,8 @@ if config['idr']['do'] and config['idr']['self_pseudo_replicates']:
                 -q {params.qvalue} \
                 $format_opt \
                 $broad_opt \
-                --outdir {params.outdir} > {log} 2>&1
+                --outdir {params.outdir} > {log} 2>&1 || true
+            if [ ! -f {output} ]; then touch {output}; fi
             """
 
 
@@ -859,8 +867,12 @@ if config['idr']['do'] and config['idr']['self_pseudo_replicates']:
             """
             idr --samples {input} --input-file-type {wildcards.broad_narrow}Peak --rank {params.rank} \
                 --output-file SPR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_rep{wildcards.rep}_SPR{wildcards.N} \
-                --plot --soft-idr-threshold {params.soft_idr_threshold} 1>{log.out} 2>{log.err}
-            mv SPR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_rep{wildcards.rep}_SPR{wildcards.N} {output}
+                --plot --soft-idr-threshold {params.soft_idr_threshold} 1>{log.out} 2>{log.err} || true
+            if [ -f SPR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_rep{wildcards.rep}_SPR{wildcards.N} ]; then
+                mv SPR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_rep{wildcards.rep}_SPR{wildcards.N} {output}
+            else
+                touch {output}
+            fi
             """
     expected_output += expand("SPR_IDR/idr/{broad_narrow}/{condition}_rep{rep}_SPR{N}.csv", broad_narrow=['broad','narrow'], condition=cc.conditions, N=range(1, config['idr'].get('self_pseudo_replicates',1)+1), rep=[1,2])
 
@@ -946,7 +958,8 @@ if config['idr']['do'] and config['idr']['pseudo_replicates']:
                 -q {params.qvalue} \
                 $format_opt \
                 $broad_opt \
-                --outdir {params.outdir} > {log} 2>&1
+                --outdir {params.outdir} > {log} 2>&1 || true
+            if [ ! -f {output} ]; then touch {output}; fi
             """
 
 
@@ -968,8 +981,12 @@ if config['idr']['do'] and config['idr']['pseudo_replicates']:
             """
             idr --samples {input} --input-file-type {wildcards.broad_narrow}Peak --rank {params.rank} \
                 --output-file PR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_PR{wildcards.N} \
-                --plot --soft-idr-threshold {params.soft_idr_threshold} 1>{log.out} 2>{log.err}
-            mv PR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_PR{wildcards.N} {output}
+                --plot --soft-idr-threshold {params.soft_idr_threshold} 1>{log.out} 2>{log.err} || true
+            if [ -f PR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_PR{wildcards.N} ]; then
+                mv PR_IDR/idr/{wildcards.broad_narrow}/{wildcards.condition}_PR{wildcards.N} {output}
+            else
+                touch {output}
+            fi
             """
 
     expected_output += expand("PR_IDR/idr/{broad_narrow}/{condition}_PR{N}.csv", broad_narrow=['broad','narrow'], condition=cc.conditions, N=range(1, config['idr'].get('pseudo_replicates',1)+1))
@@ -1337,7 +1354,7 @@ rule dot2svg:
 
 
 # Those rules takes a couple of seconds so no need for a cluster
-localrules: rulegraph
+localrules: rulegraph, dot2svg
 
 
 onsuccess:

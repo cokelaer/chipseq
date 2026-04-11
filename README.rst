@@ -1,16 +1,16 @@
 
 .. image:: https://badge.fury.io/py/sequana-chipseq.svg
-     :target: https://pypi.python.org/pypi/sequana_chipseq
+     :target: https://pypi.python.org/pypi/sequana-chipseq
 
 .. image:: https://github.com/sequana/chipseq/actions/workflows/main.yml/badge.svg
-   :target: https://github.com/sequana/chipseq/actions/workflows/main.yml
+   :target: https://github.com/sequana/chipseq/actions/workflows
 
 .. image:: https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg
-    :target: https://pypi.python.org/pypi/sequana
+    :target: https://pypi.python.org/pypi/sequana-chipseq
     :alt: Python 3.10 | 3.11 | 3.12
 
-.. image:: http://joss.theoj.org/papers/10.21105/joss.00352/status.svg
-    :target: http://joss.theoj.org/papers/10.21105/joss.00352
+.. image:: https://joss.theoj.org/papers/10.21105/joss.00352/status.svg
+    :target: https://joss.theoj.org/papers/10.21105/joss.00352
     :alt: JOSS (journal of open source software) DOI
 
 This is the **chipseq** pipeline from the `Sequana <https://sequana.readthedocs.org>`_ project.
@@ -75,7 +75,7 @@ Example::
 **4. Run the pipeline**::
 
     cd chipseq
-    sh chipseq.sh
+    bash chipseq.sh
 
 
 Usage
@@ -126,16 +126,12 @@ Run every tool inside pre-built containers — no local tool installation needed
         --input-directory DATAPATH \
         --genome-directory /path/to/genome \
         --design-file design.csv \
-        --use-apptainer
-
-Store images in a shared location to avoid re-downloading::
-
-    sequana_chipseq ... --use-apptainer --apptainer-prefix ~/.sequana/apptainers
+        --apptainer-prefix ~/.sequana/apptainers
 
 Then run as usual::
 
     cd chipseq
-    sh chipseq.sh
+    bash chipseq.sh
 
 
 Requirements
@@ -206,6 +202,13 @@ Changelog
 ========= ====================================================================
 Version   Description
 ========= ====================================================================
+0.13.0    * Migrate to standard importlib.metadata version pattern
+          * Remove click_completion dependency
+          * Add snakemake, pulp dependencies to pyproject.toml
+          * Add dot2svg to localrules
+          * Fix CI: use generate-run-shell and micromamba-shell
+          * Update environment.yml: add graphviz, pulp, sequana_pipetools
+          * Fix README badges and apptainer usage
 0.12.0    * Fix ``macs3``, ``self_pseudo_replicate_peaks``, and
             ``pseudo_replicate_peaks`` rules: macs3 exits non-zero on sparse
             CI data; added ``|| true`` + conditional ``touch`` so the pipeline
